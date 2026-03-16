@@ -1,0 +1,20 @@
+# ----- CONSTANTES ----- #
+
+# Window
+W_X_MIN = 0
+W_Y_MAX = 0
+W_X_MAX = 1000
+W_Y_MAX = 1000
+
+PERCENTAGE = 20
+STEP = 20
+
+# Viewport
+VP_X_MIN = 0
+VP_Y_MIN = 0
+VP_X_MAX = 800
+VP_Y_MAX = 600
+
+# Espessura
+POINT_THICKNESS = 5
+LINE_THICKNESS = 3
