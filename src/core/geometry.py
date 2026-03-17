@@ -1,11 +1,11 @@
-# src/core/geometry.py
+from typing import List, Tuple
 
 class ObjetoGrafico:
     """Classe base para todos os objetos do sistema"""
     def __init__(self, nome, pontos, tipo):
-        self.nome = nome
-        self.pontos = pontos # Lista de tuplas [(x,y), ]
-        self.tipo = tipo
+        self.nome: str = nome
+        self.pontos: List[Tuple[int, int]] = pontos # Lista de tuplas [(x,y), ]
+        self.tipo: str = tipo
 
 class Ponto(ObjetoGrafico):
     # Um ponto tem apenas um par de coordenadas

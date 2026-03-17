@@ -1,6 +1,7 @@
 # src/ui/main_window.py
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                             QPushButton, QListWidget, QLineEdit, QLabel, QMessageBox)
+                             QPushButton, QListWidget, QLineEdit, QLabel, QMessageBox,
+                             QGridLayout)
 from src.ui.canvas import Canvas
 from src.core.geometry import Ponto, Reta, Wireframe
 
@@ -54,12 +55,25 @@ class MainWindow(QMainWindow):
         btn_zoom_in.clicked.connect(self.zoom_in)
         btn_zoom_out.clicked.connect(self.zoom_out)
 
-        painel_layout.addWidget(btn_up)
-        painel_layout.addWidget(btn_down)
-        painel_layout.addWidget(btn_left)
-        painel_layout.addWidget(btn_right)
-        painel_layout.addWidget(btn_zoom_in)
-        painel_layout.addWidget(btn_zoom_out)
+        # Direcionais em cruz
+        nav_widget = QWidget()
+        nav_layout = QGridLayout()
+        nav_widget.setLayout(nav_layout)
+
+        nav_layout.addWidget(btn_up, 0, 1)
+        nav_layout.addWidget(btn_left, 1, 0)
+        nav_layout.addWidget(btn_right, 1, 2)
+        nav_layout.addWidget(btn_down, 2, 1)
+
+        # Zoom em linha
+        zoom_widget = QWidget()
+        zoom_layout = QHBoxLayout()
+        zoom_widget.setLayout(zoom_layout)
+        zoom_layout.addWidget(btn_zoom_in)
+        zoom_layout.addWidget(btn_zoom_out)
+
+        painel_layout.addWidget(nav_widget)
+        painel_layout.addWidget(zoom_widget)
 
         # 3. Adicionar Novo Objeto
         painel_layout.addWidget(QLabel("Adicionar Objeto:"))

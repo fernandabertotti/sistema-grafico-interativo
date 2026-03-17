@@ -1,4 +1,3 @@
-# src/core/window.py
 from src.utils.utils import W_X_MIN, W_Y_MIN, W_Y_MAX, W_X_MAX, STEP, PERCENTAGE
 
 class Window():
@@ -8,6 +7,7 @@ class Window():
         self.xmax = xmax 
         self.ymax = ymax
 
+    # --- PANNING --- #
     def up(self, step = STEP):
         # Move a janela para cima
         self.ymin += step

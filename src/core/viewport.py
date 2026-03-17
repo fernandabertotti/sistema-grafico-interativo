@@ -1,5 +1,3 @@
-# src/core/transform.py
-
 from src.utils.utils import VP_X_MIN, VP_Y_MIN, VP_X_MAX, VP_Y_MAX
 from src.core.geometry import Ponto
 
