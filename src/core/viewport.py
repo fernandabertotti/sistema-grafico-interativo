@@ -1,7 +1,7 @@
 # src/core/transform.py
 
 from src.utils.utils import VP_X_MIN, VP_Y_MIN, VP_X_MAX, VP_Y_MAX
-from geometry import Ponto
+from src.core.geometry import Ponto
 
 class Viewport():
     def __init__(self, xmin = VP_X_MIN, ymin = VP_Y_MIN, xmax = VP_X_MAX, ymax = VP_Y_MAX):
