@@ -6,6 +6,7 @@ class Window():
         self.ymin = ymin
         self.xmax = xmax 
         self.ymax = ymax
+        self.min_size = 1.0
 
     # --- PANNING --- #
     def up(self, step = STEP):
@@ -28,9 +29,18 @@ class Window():
         self.xmin -= step
         self.xmax -= step
 
+    # --- ZOOM --- #
+    # Realizado em relação ao centro da janela
     def zoom_in(self, percentage = PERCENTAGE):
         # Aproxima a visão (diminui o tamanho da window)
         factor = percentage / 100
+        new_width = (self.xmax - self.xmin) * (1 - factor)
+        new_height = (self.ymax - self.ymin) * (1 - factor)
+
+        # Evita degenerar a window e causar divisões por zero no mapeamento
+        if new_width <= self.min_size or new_height <= self.min_size:
+            return
+
         dx = (self.xmax - self.xmin) * factor / 2
         dy = (self.ymax - self.ymin) * factor / 2
         self.xmin += dx

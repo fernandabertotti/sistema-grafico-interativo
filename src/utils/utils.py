@@ -1,10 +1,10 @@
 # ----- CONSTANTES ----- #
 
 # Window
-W_X_MIN = -500
-W_Y_MIN = -500
-W_X_MAX = 500
-W_Y_MAX = 500
+W_X_MIN = -400
+W_Y_MIN = -300
+W_X_MAX = 400
+W_Y_MAX = 300
 
 PERCENTAGE = 20
 STEP = 20

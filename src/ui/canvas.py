@@ -9,17 +9,52 @@ class Canvas(QWidget):
         self.display_file = display_file
         self.window = window
         self.viewport = viewport
+        vp_width = self.viewport.xmax - self.viewport.xmin
+        vp_height = self.viewport.ymax - self.viewport.ymin
+        # Calcula a proporção da viewport
+        self.viewport_aspect = vp_width / vp_height if vp_height != 0 else 1.0
         self.setStyleSheet("background-color: white; border: 1px solid black;")
+
+    def resizeEvent(self, event):
+        self._sync_viewport_to_canvas_center()
+        super().resizeEvent(event)
+
+    def _sync_viewport_to_canvas_center(self):
+        """Ajusta a viewport para manter o conteúdo centralizado e com a proporção correta ao redimensionar o canvas."""
+        # Leitura do tamanho atual do canvas
+        canvas_width = self.width()
+        canvas_height = self.height()
+
+        # Verifica se o canvas tem dimensões válidas
+        if canvas_width <= 0 or canvas_height <= 0:
+            return
+
+        # Calcula a proporção do canvas atual
+        canvas_aspect = canvas_width / canvas_height
+
+        # Caso 1: Canvas é mais largo que a viewport, então limitamos pela altura
+        if canvas_aspect > self.viewport_aspect:
+            vp_height = float(canvas_height)
+            vp_width = vp_height * self.viewport_aspect
+            x_offset = (canvas_width - vp_width) / 2
+            y_offset = 0.0
+        # Caso 2: Canvas é mais alto que ou igual a viewport, então limitamos pela largura
+        else:
+            vp_width = float(canvas_width)
+            vp_height = vp_width / self.viewport_aspect
+            x_offset = 0.0
+            y_offset = (canvas_height - vp_height) / 2
+
+        self.viewport.xmin = x_offset
+        self.viewport.ymin = y_offset
+        self.viewport.xmax = x_offset + vp_width
+        self.viewport.ymax = y_offset + vp_height
 
     def paintEvent(self, event):
         """Função é chamada automaticamente pelo PyQt sempre que a tela precisa ser atualizada."""
         painter = QPainter(self)
         pen = QPen(Qt.GlobalColor.black, 5)  # Caneta preta, espessura 2
         painter.setPen(pen)
-
-        # Atualiza o tamanho da viewport de acordo com o tamanho real do widget na tela
-        self.viewport.xmax = self.width()
-        self.viewport.ymax = self.height()
 
         # Desenha todos os objetos do Display File
         for obj in self.display_file.objetos:
