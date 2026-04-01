@@ -306,6 +306,11 @@ class MainWindow(QMainWindow):
 
         try:
             coords = list(eval(f"[{coords_str}]"))
+
+            for x, y in coords:
+                float(x)
+                float(y)
+
             if len(coords) == 1:
                 novo_obj = Ponto(nome, coords, cor)
             elif len(coords) == 2:
@@ -328,7 +333,7 @@ class MainWindow(QMainWindow):
             self.canvas.update()
 
         except Exception as e:
-            QMessageBox.warning(self, "Erro", f"Formato inválido.\nUse: (x1, y1), (x2, y2)\nDetalhe: {e}")
+            QMessageBox.warning(self, "Erro", f"Formato de coordenadas inválido.\nUse: (x1, y1), (x2, y2), ...")
 
     # --- Funções de Navegação ---
     def mover_cima(self):
