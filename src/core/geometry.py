@@ -18,5 +18,6 @@ class Reta(ObjetoGrafico):
         super().__init__(nome, pontos, "Reta", cor)
 
 class Wireframe(ObjetoGrafico):
-    def __init__(self, nome, pontos, cor="#000000"):
+    def __init__(self, nome, pontos, cor="#000000", preenchido=False):
         super().__init__(nome, pontos, "Wireframe", cor)
+        self.preenchido = preenchido

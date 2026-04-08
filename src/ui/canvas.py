@@ -1,5 +1,6 @@
 from PyQt6.QtWidgets import QWidget
-from PyQt6.QtGui import QPainter, QPen, QColor
+from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QPolygonF
+from PyQt6.QtCore import QPointF
 
 
 class Canvas(QWidget):
@@ -74,10 +75,16 @@ class Canvas(QWidget):
                 painter.drawLine(int(x1), int(y1), int(x2), int(y2))
 
             elif obj.tipo == "Wireframe":
-                for i in range(len(coords_vp) - 1):
-                    x1, y1 = coords_vp[i]
-                    x2, y2 = coords_vp[i + 1]
-                    painter.drawLine(int(x1), int(y1), int(x2), int(y2))
-                x_inicio, y_inicio = coords_vp[0]
-                x_fim, y_fim = coords_vp[-1]
-                painter.drawLine(int(x_fim), int(y_fim), int(x_inicio), int(y_inicio))
+                if getattr(obj, 'preenchido', False):
+                    poligono = QPolygonF([QPointF(x, y) for x, y in coords_vp])
+                    painter.setBrush(QBrush(QColor(obj.cor)))
+                    painter.drawPolygon(poligono)
+                    painter.setBrush(QBrush())
+                else:
+                    for i in range(len(coords_vp) - 1):
+                        x1, y1 = coords_vp[i]
+                        x2, y2 = coords_vp[i + 1]
+                        painter.drawLine(int(x1), int(y1), int(x2), int(y2))
+                    x_inicio, y_inicio = coords_vp[0]
+                    x_fim, y_fim = coords_vp[-1]
+                    painter.drawLine(int(x_fim), int(y_fim), int(x_inicio), int(y_inicio))
