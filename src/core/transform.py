@@ -46,7 +46,7 @@ class Transform:
 
     @staticmethod
     def centro_objeto(pontos: List[Tuple[float, float]]) -> Tuple[float, float]:
-        """Calcula o centro geométrico de um objeto."""
+        """Calcula o center geométrico de um objeto."""
         n = len(pontos)
         if n == 0:
             return (0.0, 0.0)
@@ -64,9 +64,9 @@ class Transform:
 
     @staticmethod
     def escalonamento_centro(pontos, sx, sy):
-        """Aplica escalonamento em torno do centro do objeto.
+        """Aplica escalonamento em torno do center do objeto.
         
-        Passos: transladar centro para origem → escalonar → transladar de volta.
+        Passos: transladar center para origem → escalonar → transladar de volta.
         """
         cx, cy = Transform.centro_objeto(pontos)
         m = Transform.translation_matrix(-cx, -cy)
@@ -76,13 +76,13 @@ class Transform:
 
     @staticmethod
     def rotacao_origem(pontos, angulo):
-        """Aplica rotação em torno do centro do mundo (origem)."""
+        """Aplica rotação em torno do center do mundo (origem)."""
         m = Transform.rotation_matrix(angulo)
         return Transform.apply_matrix(m, pontos)
 
     @staticmethod
     def rotacao_centro(pontos, angulo):
-        """Aplica rotação em torno do centro do objeto."""
+        """Aplica rotação em torno do center do objeto."""
         cx, cy = Transform.centro_objeto(pontos)
         m = Transform.translation_matrix(-cx, -cy)
         m = m @ Transform.rotation_matrix(angulo)
@@ -102,8 +102,8 @@ class Transform:
         """Aplica uma lista de transformações sequencialmente a um conjunto de pontos.
         
         A matriz resultante é calculada combinando todas as transformações.
-        Para transformações que dependem do centro do objeto (escalonamento e rotação_centro),
-        o centro é recalculado com base nos pontos atuais.
+        Para transformações que dependem do center do objeto (escalonamento e rotação_centro),
+        o center é recalculado com base nos pontos atuais.
         """
         resultado = list(pontos)
         for transf in lista_transformacoes:

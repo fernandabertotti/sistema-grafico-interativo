@@ -1,7 +1,5 @@
 from PyQt6.QtWidgets import QWidget
-from PyQt6.QtGui import QPainter, QPen
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QPainter, QPen, QColor
 
 
 class Canvas(QWidget):
@@ -21,8 +19,7 @@ class Canvas(QWidget):
         super().resizeEvent(event)
 
     def _sync_viewport_to_canvas_center(self):
-        """Ajusta a viewport para manter o conteúdo centralizado e com a proporção correta ao redimensionar o canvas."""
-        # Leitura do tamanho atual do canvas
+        """Ajusta a viewport para manter o conteúdo centralizado e com a proporção correta."""
         canvas_width = self.width()
         canvas_height = self.height()
 
@@ -33,13 +30,13 @@ class Canvas(QWidget):
         # Calcula a proporção do canvas atual
         canvas_aspect = canvas_width / canvas_height
 
-        # Caso 1: Canvas é mais largo que a viewport, então limitamos pela altura
+        # Caso 1: Canvas é mais largo que a viewport, então limitamos pela hight
         if canvas_aspect > self.viewport_aspect:
             vp_height = float(canvas_height)
             vp_width = vp_height * self.viewport_aspect
             x_offset = (canvas_width - vp_width) / 2
             y_offset = 0.0
-        # Caso 2: Canvas é mais alto que ou igual a viewport, então limitamos pela largura
+        # Caso 2: Canvas é mais alto que ou igual a viewport, então limitamos pela width
         else:
             vp_width = float(canvas_width)
             vp_height = vp_width / self.viewport_aspect
@@ -51,20 +48,22 @@ class Canvas(QWidget):
         self.viewport.xmax = x_offset + vp_width
         self.viewport.ymax = y_offset + vp_height
 
+    def _transformar_ponto(self, ponto_mundo):
+        """Converte ponto do mundo -> SCN -> Viewport."""
+        ponto_scn = self.window.generate_scn(ponto_mundo)
+        return self.viewport.viewport_transform_scn(ponto_scn)
+
     def paintEvent(self, event):
-        """Função é chamada automaticamente pelo PyQt sempre que a tela precisa ser atualizada."""
+        """Desenha todos os objetos do Display File."""
         painter = QPainter(self)
-        
-        # Desenha todos os objetos do Display File
+
         for obj in self.display_file.objetos:
-            # Configura a caneta com a cor do objeto atual e a espessura adequada
-            pen = QPen(QColor(obj.cor), 3)  
+            pen = QPen(QColor(obj.cor), 3)
             painter.setPen(pen)
 
-            # 1. Transforma todas as coordenadas do objeto (Window -> Viewport)
-            coords_vp = [self.viewport.viewport_transform(pt, self.window) for pt in obj.pontos]
-            
-            # 2. Desenha o objeto de acordo com o seu tipo
+            # Transforma coordenadas do mundo -> SCN -> Viewport
+            coords_vp = [self._transformar_ponto(pt) for pt in obj.pontos]
+
             if obj.tipo == "Ponto":
                 x, y = coords_vp[0]
                 painter.drawPoint(int(x), int(y))

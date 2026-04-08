@@ -2,11 +2,12 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QListWidget, QLineEdit, QLabel, QMessageBox,
                              QGridLayout, QGroupBox, QDialog, QTabWidget,
-                             QMenu, QButtonGroup, QRadioButton, QComboBox)
+                             QMenu, QButtonGroup, QRadioButton, QComboBox, QFileDialog)
 from PyQt6.QtCore import Qt
 from src.ui.canvas import Canvas
 from src.core.geometry import Ponto, Reta, Wireframe
 from src.core.transform import Transform
+from src.core.obj_io import salvar_obj, carregar_obj
 
 
 # --- CLASSE DO DIÁLOGO (POP-UP) ---
@@ -20,7 +21,7 @@ class JanelaObjetoDialog(QDialog):
         self.setFixedSize(500, 480)
         self.modo_edicao = modo_edicao
         self.apagar_solicitado = False
-        self.lista_transformacoes = []  # Lista de transformações acumuladas
+        self.lista_transformacoes = []
 
         layout_principal = QVBoxLayout(self)
 
@@ -130,8 +131,8 @@ class JanelaObjetoDialog(QDialog):
         linha_angulo.addStretch()
         lr.addLayout(linha_angulo)
 
-        self.radio_centro_mundo = QRadioButton("Em torno do centro do mundo")
-        self.radio_centro_objeto = QRadioButton("Em torno do centro do objeto")
+        self.radio_centro_mundo = QRadioButton("Em torno do center do mundo")
+        self.radio_centro_objeto = QRadioButton("Em torno do center do objeto")
         self.radio_ponto_arb = QRadioButton("Em torno de um ponto arbitrário")
         self.radio_centro_objeto.setChecked(True)
 
@@ -151,12 +152,10 @@ class JanelaObjetoDialog(QDialog):
         linha_ponto.addStretch()
         lr.addLayout(linha_ponto)
 
-        # Habilitar/desabilitar campos Px, Py conforme seleção
         self.radio_ponto_arb.toggled.connect(self.toggle_ponto_arbitrario)
         self.input_px.setEnabled(False)
         self.input_py.setEnabled(False)
 
-        # Adicionar todos os widgets de campos
         self.layout_campos.addWidget(self.widget_translacao)
         self.layout_campos.addWidget(self.widget_escalonamento)
         self.layout_campos.addWidget(self.widget_rotacao)
@@ -232,10 +231,10 @@ class JanelaObjetoDialog(QDialog):
                 angulo = float(self.input_angulo.text())
                 if self.radio_centro_mundo.isChecked():
                     self.lista_transformacoes.append(("rotacao_origem", angulo))
-                    self.lista_transf_widget.addItem(f"Rotação {angulo}° (centro do mundo)")
+                    self.lista_transf_widget.addItem(f"Rotação {angulo}° (center do mundo)")
                 elif self.radio_centro_objeto.isChecked():
                     self.lista_transformacoes.append(("rotacao_centro", angulo))
-                    self.lista_transf_widget.addItem(f"Rotação {angulo}° (centro do objeto)")
+                    self.lista_transf_widget.addItem(f"Rotação {angulo}° (center do objeto)")
                 elif self.radio_ponto_arb.isChecked():
                     px = float(self.input_px.text())
                     py = float(self.input_py.text())
@@ -275,8 +274,8 @@ class MainWindow(QMainWindow):
         self.viewport = viewport
         self.transform = Transform()
 
-        self.setWindowTitle("Sistema Grafico Interativo - V1.2")
-        self.setGeometry(100, 100, 1000, 600)
+        self.setWindowTitle("Sistema Grafico Interativo - V1.3")
+        self.setGeometry(100, 100, 1050, 650)
 
         self.aplicar_tema()
         self.setup_ui()
@@ -361,6 +360,16 @@ class MainWindow(QMainWindow):
         botoes_lista_layout.addWidget(btn_editar)
         layout_objetos.addLayout(botoes_lista_layout)
 
+        # Botões de importar/exportar OBJ
+        botoes_obj_layout = QHBoxLayout()
+        btn_importar = QPushButton("Importar .obj")
+        btn_importar.clicked.connect(self.importar_obj)
+        btn_exportar = QPushButton("Exportar .obj")
+        btn_exportar.clicked.connect(self.exportar_obj)
+        botoes_obj_layout.addWidget(btn_importar)
+        botoes_obj_layout.addWidget(btn_exportar)
+        layout_objetos.addLayout(botoes_obj_layout)
+
         painel_layout.addWidget(grupo_objetos)
 
         # --- Grupo 2: Navegação e Zoom ---
@@ -392,6 +401,30 @@ class MainWindow(QMainWindow):
         zoom_layout.addWidget(btn_zoom_in)
         zoom_layout.addWidget(btn_zoom_out)
         layout_nav.addLayout(zoom_layout)
+
+        # --- Rotação da Window ---
+        rot_layout = QHBoxLayout()
+        rot_layout.addWidget(QLabel("Rotação:"))
+        self.input_rot_window = QLineEdit("10")
+        self.input_rot_window.setFixedWidth(50)
+        rot_layout.addWidget(self.input_rot_window)
+        rot_layout.addWidget(QLabel("°"))
+
+        btn_rot_esq = QPushButton("↺")
+        btn_rot_esq.setFixedWidth(30)
+        btn_rot_esq.clicked.connect(self.rotacionar_window_esquerda)
+        btn_rot_dir = QPushButton("↻")
+        btn_rot_dir.setFixedWidth(30)
+        btn_rot_dir.clicked.connect(self.rotacionar_window_direita)
+        rot_layout.addWidget(btn_rot_esq)
+        rot_layout.addWidget(btn_rot_dir)
+        rot_layout.addStretch()
+
+        layout_nav.addLayout(rot_layout)
+
+        # Label que mostra o ângulo atual
+        self.label_angulo = QLabel("Ângulo atual: 0.0°")
+        layout_nav.addWidget(self.label_angulo)
 
         painel_layout.addWidget(grupo_nav)
         painel_layout.addStretch()
@@ -549,3 +582,63 @@ class MainWindow(QMainWindow):
     def zoom_out(self):
         self.window_obj.zoom_out()
         self.canvas.update()
+
+    # --- Rotação da Window ---
+    def rotacionar_window_esquerda(self):
+        try:
+            angulo = float(self.input_rot_window.text())
+            self.window_obj.rotate(angulo)
+            self.label_angulo.setText(f"Ângulo atual: {self.window_obj.angulo:.1f}°")
+            self.canvas.update()
+        except ValueError:
+            QMessageBox.warning(self, "Erro", "Ângulo inválido.")
+
+    def rotacionar_window_direita(self):
+        try:
+            angulo = float(self.input_rot_window.text())
+            self.window_obj.rotate(-angulo)
+            self.label_angulo.setText(f"Ângulo atual: {self.window_obj.angulo:.1f}°")
+            self.canvas.update()
+        except ValueError:
+            QMessageBox.warning(self, "Erro", "Ângulo inválido.")
+
+    # --- Importar/Exportar OBJ ---
+    def importar_obj(self):
+        filepath, _ = QFileDialog.getOpenFileName(
+            self, "Importar arquivo .obj", "", "Wavefront OBJ (*.obj);;Todos (*)")
+        if not filepath:
+            return
+
+        try:
+            objetos = carregar_obj(filepath)
+            for obj in objetos:
+                # Evitar nomes duplicados
+                nomes_existentes = [o.nome for o in self.display_file.obter_todos()]
+                nome_original = obj.nome
+                contador = 1
+                while obj.nome in nomes_existentes:
+                    obj.nome = f"{nome_original}_{contador}"
+                    contador += 1
+
+                self.display_file.adicionar_objeto(obj)
+                texto = f"{obj.nome} [{obj.tipo}]"
+                self.list_widget.addItem(texto)
+                novo_item = self.list_widget.item(self.list_widget.count() - 1)
+                novo_item.setData(Qt.ItemDataRole.UserRole, obj.nome)
+
+            self.canvas.update()
+            QMessageBox.information(self, "Sucesso", f"{len(objetos)} objeto(s) importado(s).")
+        except Exception as e:
+            QMessageBox.warning(self, "Erro", f"Erro ao importar .obj:\n{str(e)}")
+
+    def exportar_obj(self):
+        filepath, _ = QFileDialog.getSaveFileName(
+            self, "Exportar arquivo .obj", "mundo.obj", "Wavefront OBJ (*.obj);;Todos (*)")
+        if not filepath:
+            return
+
+        try:
+            salvar_obj(filepath, self.display_file)
+            QMessageBox.information(self, "Sucesso", f"Mundo exportado para:\n{filepath}")
+        except Exception as e:
+            QMessageBox.warning(self, "Erro", f"Erro ao exportar .obj:\n{str(e)}")
