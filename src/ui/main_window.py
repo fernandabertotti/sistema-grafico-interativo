@@ -2,21 +2,25 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QListWidget, QLineEdit, QLabel, QMessageBox,
                              QGridLayout, QGroupBox, QDialog, QTabWidget,
-                             QMenu, QButtonGroup)
+                             QMenu, QButtonGroup, QRadioButton, QComboBox)
 from PyQt6.QtCore import Qt
 from src.ui.canvas import Canvas
 from src.core.geometry import Ponto, Reta, Wireframe
+from src.core.transform import Transform
+
 
 # --- CLASSE DO DIÁLOGO (POP-UP) ---
 
 class JanelaObjetoDialog(QDialog):
     """Janela modal para adicionar ou editar objetos"""
+
     def __init__(self, parent=None, nome="", coords="", cor_atual="#000000", modo_edicao=False):
         super().__init__(parent)
         self.setWindowTitle("Propriedades do Objeto" if modo_edicao else "Novo Objeto")
-        self.setFixedSize(350, 300)
+        self.setFixedSize(500, 480)
         self.modo_edicao = modo_edicao
         self.apagar_solicitado = False
+        self.lista_transformacoes = []  # Lista de transformações acumuladas
 
         layout_principal = QVBoxLayout(self)
 
@@ -27,11 +31,11 @@ class JanelaObjetoDialog(QDialog):
         # Aba 1: Geometria
         self.aba_geometria = QWidget()
         layout_geometria = QVBoxLayout(self.aba_geometria)
-        
+
         layout_geometria.addWidget(QLabel("Nome do Objeto:"))
         self.input_nome = QLineEdit(nome)
         if modo_edicao:
-            self.input_nome.setReadOnly(True) 
+            self.input_nome.setReadOnly(True)
             self.input_nome.setStyleSheet("background-color: #E0E0E0;")
         layout_geometria.addWidget(self.input_nome)
 
@@ -43,10 +47,9 @@ class JanelaObjetoDialog(QDialog):
         layout_geometria.addWidget(QLabel("Cor do Traço:"))
         layout_cores = QHBoxLayout()
         self.grupo_cores = QButtonGroup(self)
-        
-        # Lista de cores hexadecimais (Preto, Vermelho, Verde, Azul, Amarelo, Magenta, Ciano, Laranja)
+
         self.lista_cores = ["#000000", "#FF0000", "#00FF00", "#0000FF", "#FFFF00", "#FF00FF", "#00FFFF", "#FFA500"]
-        
+
         for i, cor in enumerate(self.lista_cores):
             btn_cor = QPushButton()
             btn_cor.setFixedSize(20, 20)
@@ -57,10 +60,10 @@ class JanelaObjetoDialog(QDialog):
             btn_cor.setCheckable(True)
             self.grupo_cores.addButton(btn_cor, i)
             layout_cores.addWidget(btn_cor)
-            
+
             if cor == cor_atual:
                 btn_cor.setChecked(True)
-                
+
         if self.grupo_cores.checkedId() == -1:
             self.grupo_cores.button(0).setChecked(True)
 
@@ -70,14 +73,118 @@ class JanelaObjetoDialog(QDialog):
 
         self.abas.addTab(self.aba_geometria, "Geometria")
 
-        # Aba 2: Transformações
+        # Aba 2: Transformações 2D
         self.aba_transformacoes = QWidget()
         layout_transf = QVBoxLayout(self.aba_transformacoes)
-        layout_transf.addWidget(QLabel("Ferramentas de Transformação 2D\n(Translação, Escala, Rotação)\n\nEm desenvolvimento..."))
+
+        # --- Seletor de tipo de transformação ---
+        layout_tipo = QHBoxLayout()
+        layout_tipo.addWidget(QLabel("Tipo:"))
+        self.combo_tipo = QComboBox()
+        self.combo_tipo.addItems(["Translação", "Escalonamento", "Rotação"])
+        self.combo_tipo.currentIndexChanged.connect(self.atualizar_campos_transformacao)
+        layout_tipo.addWidget(self.combo_tipo)
+        layout_transf.addLayout(layout_tipo)
+
+        self.grupo_campos = QGroupBox("Parâmetros")
+        self.layout_campos = QVBoxLayout(self.grupo_campos)
+
+        # Campos de Translação
+        self.widget_translacao = QWidget()
+        lt = QHBoxLayout(self.widget_translacao)
+        lt.setContentsMargins(0, 0, 0, 0)
+        lt.addWidget(QLabel("Dx:"))
+        self.input_dx = QLineEdit("0")
+        self.input_dx.setFixedWidth(60)
+        lt.addWidget(self.input_dx)
+        lt.addWidget(QLabel("Dy:"))
+        self.input_dy = QLineEdit("0")
+        self.input_dy.setFixedWidth(60)
+        lt.addWidget(self.input_dy)
+        lt.addStretch()
+
+        # Campos de Escalonamento
+        self.widget_escalonamento = QWidget()
+        le = QHBoxLayout(self.widget_escalonamento)
+        le.setContentsMargins(0, 0, 0, 0)
+        le.addWidget(QLabel("Sx:"))
+        self.input_sx = QLineEdit("1")
+        self.input_sx.setFixedWidth(60)
+        le.addWidget(self.input_sx)
+        le.addWidget(QLabel("Sy:"))
+        self.input_sy = QLineEdit("1")
+        self.input_sy.setFixedWidth(60)
+        le.addWidget(self.input_sy)
+        le.addStretch()
+
+        # Campos de Rotação
+        self.widget_rotacao = QWidget()
+        lr = QVBoxLayout(self.widget_rotacao)
+        lr.setContentsMargins(0, 0, 0, 0)
+
+        linha_angulo = QHBoxLayout()
+        linha_angulo.addWidget(QLabel("Ângulo (graus):"))
+        self.input_angulo = QLineEdit("0")
+        self.input_angulo.setFixedWidth(60)
+        linha_angulo.addWidget(self.input_angulo)
+        linha_angulo.addStretch()
+        lr.addLayout(linha_angulo)
+
+        self.radio_centro_mundo = QRadioButton("Em torno do centro do mundo")
+        self.radio_centro_objeto = QRadioButton("Em torno do centro do objeto")
+        self.radio_ponto_arb = QRadioButton("Em torno de um ponto arbitrário")
+        self.radio_centro_objeto.setChecked(True)
+
+        lr.addWidget(self.radio_centro_mundo)
+        lr.addWidget(self.radio_centro_objeto)
+        lr.addWidget(self.radio_ponto_arb)
+
+        linha_ponto = QHBoxLayout()
+        linha_ponto.addWidget(QLabel("   Px:"))
+        self.input_px = QLineEdit("0")
+        self.input_px.setFixedWidth(60)
+        linha_ponto.addWidget(self.input_px)
+        linha_ponto.addWidget(QLabel("Py:"))
+        self.input_py = QLineEdit("0")
+        self.input_py.setFixedWidth(60)
+        linha_ponto.addWidget(self.input_py)
+        linha_ponto.addStretch()
+        lr.addLayout(linha_ponto)
+
+        # Habilitar/desabilitar campos Px, Py conforme seleção
+        self.radio_ponto_arb.toggled.connect(self.toggle_ponto_arbitrario)
+        self.input_px.setEnabled(False)
+        self.input_py.setEnabled(False)
+
+        # Adicionar todos os widgets de campos
+        self.layout_campos.addWidget(self.widget_translacao)
+        self.layout_campos.addWidget(self.widget_escalonamento)
+        self.layout_campos.addWidget(self.widget_rotacao)
+
+        layout_transf.addWidget(self.grupo_campos)
+
+        # Botão para adicionar transformação à lista
+        btn_add_transf = QPushButton("Adicionar à lista ▼")
+        btn_add_transf.clicked.connect(self.adicionar_transformacao)
+        layout_transf.addWidget(btn_add_transf)
+
+        # Lista de transformações acumuladas
+        layout_transf.addWidget(QLabel("Transformações a aplicar:"))
+        self.lista_transf_widget = QListWidget()
+        self.lista_transf_widget.setMaximumHeight(100)
+        layout_transf.addWidget(self.lista_transf_widget)
+
+        # Botão para remover transformação da lista
+        btn_rem_transf = QPushButton("Remover selecionada")
+        btn_rem_transf.clicked.connect(self.remover_transformacao)
+        layout_transf.addWidget(btn_rem_transf)
+
         self.abas.addTab(self.aba_transformacoes, "Transformações 2D")
-        
+
         if not modo_edicao:
             self.abas.setTabEnabled(1, False)
+
+        self.atualizar_campos_transformacao(0)
 
         # Botoes de Acao Inferiores
         layout_botoes = QHBoxLayout()
@@ -85,7 +192,7 @@ class JanelaObjetoDialog(QDialog):
             btn_apagar = QPushButton("Apagar")
             btn_apagar.clicked.connect(self.acao_apagar)
             layout_botoes.addWidget(btn_apagar)
-            
+
         layout_botoes.addStretch()
         btn_ok = QPushButton("OK")
         btn_ok.clicked.connect(self.accept)
@@ -94,6 +201,55 @@ class JanelaObjetoDialog(QDialog):
         layout_botoes.addWidget(btn_ok)
         layout_botoes.addWidget(btn_cancelar)
         layout_principal.addLayout(layout_botoes)
+
+    def toggle_ponto_arbitrario(self, checked):
+        self.input_px.setEnabled(checked)
+        self.input_py.setEnabled(checked)
+
+    def atualizar_campos_transformacao(self, index):
+        """Mostra/esconde os campos conforme o tipo de transformação selecionado."""
+        self.widget_translacao.setVisible(index == 0)
+        self.widget_escalonamento.setVisible(index == 1)
+        self.widget_rotacao.setVisible(index == 2)
+
+    def adicionar_transformacao(self):
+        """Adiciona a transformação atual à lista de transformações."""
+        try:
+            tipo_idx = self.combo_tipo.currentIndex()
+            if tipo_idx == 0:  # Translação
+                dx = float(self.input_dx.text())
+                dy = float(self.input_dy.text())
+                self.lista_transformacoes.append(("translacao", dx, dy))
+                self.lista_transf_widget.addItem(f"Translação (dx={dx}, dy={dy})")
+
+            elif tipo_idx == 1:  # Escalonamento
+                sx = float(self.input_sx.text())
+                sy = float(self.input_sy.text())
+                self.lista_transformacoes.append(("escalonamento", sx, sy))
+                self.lista_transf_widget.addItem(f"Escalonamento (sx={sx}, sy={sy})")
+
+            elif tipo_idx == 2:  # Rotação
+                angulo = float(self.input_angulo.text())
+                if self.radio_centro_mundo.isChecked():
+                    self.lista_transformacoes.append(("rotacao_origem", angulo))
+                    self.lista_transf_widget.addItem(f"Rotação {angulo}° (centro do mundo)")
+                elif self.radio_centro_objeto.isChecked():
+                    self.lista_transformacoes.append(("rotacao_centro", angulo))
+                    self.lista_transf_widget.addItem(f"Rotação {angulo}° (centro do objeto)")
+                elif self.radio_ponto_arb.isChecked():
+                    px = float(self.input_px.text())
+                    py = float(self.input_py.text())
+                    self.lista_transformacoes.append(("rotacao_ponto", angulo, px, py))
+                    self.lista_transf_widget.addItem(f"Rotação {angulo}° (ponto ({px},{py}))")
+        except ValueError:
+            QMessageBox.warning(self, "Erro", "Valores numéricos inválidos.")
+
+    def remover_transformacao(self):
+        """Remove a transformação selecionada da lista."""
+        row = self.lista_transf_widget.currentRow()
+        if row >= 0:
+            self.lista_transf_widget.takeItem(row)
+            self.lista_transformacoes.pop(row)
 
     def acao_apagar(self):
         self.apagar_solicitado = True
@@ -104,6 +260,10 @@ class JanelaObjetoDialog(QDialog):
         cor_selecionada = self.lista_cores[id_cor] if id_cor != -1 else "#000000"
         return self.input_nome.text(), self.input_coords.text(), cor_selecionada
 
+    def obter_transformacoes(self):
+        """Retorna a lista de transformações acumuladas."""
+        return self.lista_transformacoes
+
 
 # --- CLASSE DA JANELA PRINCIPAL ---
 
@@ -113,8 +273,9 @@ class MainWindow(QMainWindow):
         self.display_file = display_file
         self.window_obj = window_obj
         self.viewport = viewport
+        self.transform = Transform()
 
-        self.setWindowTitle("Sistema Grafico Interativo - V1.1")
+        self.setWindowTitle("Sistema Grafico Interativo - V1.2")
         self.setGeometry(100, 100, 1000, 600)
 
         self.aplicar_tema()
@@ -140,7 +301,6 @@ class MainWindow(QMainWindow):
                 border-bottom-color: #808080;
                 border-right-color: #808080;
             }
-            /* Aqui agrupamos os campos de texto, a lista e o nosso canvas */
             QLineEdit, QListWidget, QWidget#AreaCanvas {
                 border: 2px inset #808080;
                 border-bottom-color: #FFFFFF;
@@ -161,6 +321,13 @@ class MainWindow(QMainWindow):
                 border-bottom-color: #808080;
                 border-right-color: #808080;
             }
+            QComboBox {
+                border: 2px inset #808080;
+                border-bottom-color: #FFFFFF;
+                border-right-color: #FFFFFF;
+                background-color: white;
+                padding: 2px 4px;
+            }
         """
         self.setStyleSheet(estilo)
 
@@ -177,7 +344,7 @@ class MainWindow(QMainWindow):
         # --- Grupo 1: Objetos ---
         grupo_objetos = QGroupBox("Objetos")
         layout_objetos = QVBoxLayout(grupo_objetos)
-        
+
         self.list_widget = QListWidget()
         self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list_widget.customContextMenuRequested.connect(self.abrir_menu_contexto)
@@ -189,11 +356,11 @@ class MainWindow(QMainWindow):
         btn_novo.clicked.connect(self.abrir_dialogo_novo_objeto)
         btn_editar = QPushButton("Editar...")
         btn_editar.clicked.connect(self.editar_objeto_selecionado)
-        
+
         botoes_lista_layout.addWidget(btn_novo)
         botoes_lista_layout.addWidget(btn_editar)
         layout_objetos.addLayout(botoes_lista_layout)
-        
+
         painel_layout.addWidget(grupo_objetos)
 
         # --- Grupo 2: Navegação e Zoom ---
@@ -220,7 +387,7 @@ class MainWindow(QMainWindow):
         nav_grid.addWidget(btn_right, 1, 2)
         nav_grid.addWidget(btn_down, 2, 1)
         layout_nav.addLayout(nav_grid)
-        
+
         zoom_layout = QHBoxLayout()
         zoom_layout.addWidget(btn_zoom_in)
         zoom_layout.addWidget(btn_zoom_out)
@@ -231,20 +398,18 @@ class MainWindow(QMainWindow):
 
         # DIREITA: Canvas (Viewport)
         grupo_viewport = QGroupBox("Viewport")
-        
+
         layout_canvas = QVBoxLayout(grupo_viewport)
-        # Adiciona uma margem para que o canvas não fique colado na linha do GroupBox
-        layout_canvas.setContentsMargins(10, 15, 10, 10) 
-        
+        layout_canvas.setContentsMargins(10, 15, 10, 10)
+
         self.canvas = Canvas(self.display_file, self.window_obj, self.viewport)
 
-        # Identifica o canvas para o CSS aplicar o fundo branco e a borda rebaixada
-        self.canvas.setObjectName("AreaCanvas") 
-        self.canvas.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True) # Força o PyQt a pintar o fundo do QSS
-        self.canvas.setStyleSheet("") # Limpa qualquer estilo conflitante que estava no canvas.py
-        
+        self.canvas.setObjectName("AreaCanvas")
+        self.canvas.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.canvas.setStyleSheet("")
+
         layout_canvas.addWidget(self.canvas)
-        
+
         main_layout.addWidget(grupo_viewport, stretch=4)
 
     # --- Funções de Ação de Interface ---
@@ -266,15 +431,39 @@ class MainWindow(QMainWindow):
         if not obj_ref: return
 
         coords_str = ", ".join([str(pt) for pt in obj_ref.pontos])
-        
-        dialogo = JanelaObjetoDialog(self, nome=obj_ref.nome, coords=coords_str, cor_atual=obj_ref.cor, modo_edicao=True)
+
+        dialogo = JanelaObjetoDialog(self, nome=obj_ref.nome, coords=coords_str, cor_atual=obj_ref.cor,
+                                     modo_edicao=True)
         if dialogo.exec():
             if dialogo.apagar_solicitado:
                 self.apagar_objeto(item_atual)
             else:
                 _, novas_coords_str, nova_cor = dialogo.obter_dados()
-                self.display_file.remover_objeto(obj_ref.nome)
-                self.processar_adicao_objeto(obj_ref.nome, novas_coords_str, nova_cor, item_lista=item_atual)
+
+                # Aplica transformações acumuladas (se houver)
+                transformacoes = dialogo.obter_transformacoes()
+                if transformacoes:
+                    novos_pontos = Transform.aplicar_lista_transformacoes(obj_ref.pontos, transformacoes)
+                    obj_ref.pontos = novos_pontos
+                    # Atualiza o campo de coordenadas para refletir a transformação
+                    obj_ref.cor = nova_cor
+                    self.canvas.update()
+                    return
+
+                # Atualiza cor
+                obj_ref.cor = nova_cor
+
+                # Atualiza coordenadas se o usuário editou manualmente
+                try:
+                    coords_editadas = list(eval(f"[{novas_coords_str}]"))
+                    for x, y in coords_editadas:
+                        float(x)
+                        float(y)
+                    obj_ref.pontos = coords_editadas
+                except:
+                    pass
+
+                self.canvas.update()
 
     def apagar_objeto(self, item):
         nome_obj = item.data(Qt.ItemDataRole.UserRole)
@@ -287,10 +476,11 @@ class MainWindow(QMainWindow):
         item = self.list_widget.itemAt(posicao)
         if item:
             menu = QMenu()
-            menu.setStyleSheet("QMenu { background-color: #D4D0C8; border: 1px solid black; } QMenu::item:selected { background-color: #000080; color: white; }")
+            menu.setStyleSheet(
+                "QMenu { background-color: #D4D0C8; border: 1px solid black; } QMenu::item:selected { background-color: #000080; color: white; }")
             acao_editar = menu.addAction("Propriedades...")
             acao_apagar = menu.addAction("Apagar")
-            
+
             acao = menu.exec(self.list_widget.mapToGlobal(posicao))
             if acao == acao_editar:
                 self.editar_objeto_selecionado()
@@ -322,7 +512,7 @@ class MainWindow(QMainWindow):
 
             self.display_file.adicionar_objeto(novo_obj)
             texto_exibicao = f"{nome} [{novo_obj.tipo}]"
-            
+
             if item_lista:
                 item_lista.setText(texto_exibicao)
             else:
