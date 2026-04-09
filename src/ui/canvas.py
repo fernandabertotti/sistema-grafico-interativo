@@ -1,7 +1,13 @@
 from PyQt6.QtWidgets import QWidget
 from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QPolygonF
 from PyQt6.QtCore import QPointF
-
+from src.utils.utils import VP_MARGIN
+from src.core.clipping import (
+    clip_ponto,
+    clip_reta_cohen_sutherland,   # ou liang_barsky — escolha uma e use radio button na UI
+    clip_reta_liang_barsky,
+    clip_poligono_sutherland_hodgman,
+)
 
 class Canvas(QWidget):
     def __init__(self, display_file, window, viewport):
@@ -9,6 +15,7 @@ class Canvas(QWidget):
         self.display_file = display_file
         self.window = window
         self.viewport = viewport
+        self.algoritmo_clip_reta = "CS"  
         vp_width = self.viewport.xmax - self.viewport.xmin
         vp_height = self.viewport.ymax - self.viewport.ymin
         # Calcula a proporção da viewport
@@ -44,6 +51,13 @@ class Canvas(QWidget):
             x_offset = 0.0
             y_offset = (canvas_height - vp_height) / 2
 
+        # Aplica margem para criar a moldura de clipping
+        margin = VP_MARGIN
+        vp_width -= 2 * margin
+        vp_height -= 2 * margin
+        x_offset = (canvas_width - vp_width) / 2
+        y_offset = (canvas_height - vp_height) / 2
+
         self.viewport.xmin = x_offset
         self.viewport.ymin = y_offset
         self.viewport.xmax = x_offset + vp_width
@@ -58,33 +72,61 @@ class Canvas(QWidget):
         """Desenha todos os objetos do Display File."""
         painter = QPainter(self)
 
+        # Desenha a moldura vermelha da viewport
+        vp = self.viewport
+        pen_borda = QPen(QColor("red"), 2)
+        painter.setPen(pen_borda)
+        painter.setBrush(QBrush())
+        painter.drawRect(int(vp.xmin), int(vp.ymin),
+                         int(vp.xmax - vp.xmin), int(vp.ymax - vp.ymin))
+
         for obj in self.display_file.objetos:
             pen = QPen(QColor(obj.cor), 3)
             painter.setPen(pen)
 
-            # Transforma coordenadas do mundo -> SCN -> Viewport
-            coords_vp = [self._transformar_ponto(pt) for pt in obj.pontos]
+            # Converte para SCN (clipping acontece aqui, em [-1,1]x[-1,1])
+            coords_scn = [self.window.generate_scn(pt) for pt in obj.pontos]
 
             if obj.tipo == "Ponto":
-                x, y = coords_vp[0]
-                painter.drawPoint(int(x), int(y))
+                if clip_ponto(coords_scn[0]):
+                    x, y = self.viewport.viewport_transform_scn(coords_scn[0])
+                    painter.drawPoint(int(x), int(y))
 
             elif obj.tipo == "Reta":
-                x1, y1 = coords_vp[0]
-                x2, y2 = coords_vp[1]
-                painter.drawLine(int(x1), int(y1), int(x2), int(y2))
+                fn_clip = (clip_reta_cohen_sutherland
+                           if self.algoritmo_clip_reta == "CS"
+                           else clip_reta_liang_barsky)
+                resultado = fn_clip(coords_scn[0], coords_scn[1])
+                if resultado:
+                    p1c, p2c = resultado
+                    x1, y1 = self.viewport.viewport_transform_scn(p1c)
+                    x2, y2 = self.viewport.viewport_transform_scn(p2c)
+                    painter.drawLine(int(x1), int(y1), int(x2), int(y2))
 
             elif obj.tipo == "Wireframe":
+                fn_clip = (clip_reta_cohen_sutherland
+                           if self.algoritmo_clip_reta == "CS"
+                           else clip_reta_liang_barsky)
+
                 if getattr(obj, 'preenchido', False):
-                    poligono = QPolygonF([QPointF(x, y) for x, y in coords_vp])
-                    painter.setBrush(QBrush(QColor(obj.cor)))
-                    painter.drawPolygon(poligono)
-                    painter.setBrush(QBrush())
+                    # Polígono preenchido → Sutherland-Hodgman
+                    clipados = clip_poligono_sutherland_hodgman(coords_scn)
+                    if len(clipados) >= 3:
+                        coords_vp = [self.viewport.viewport_transform_scn(p)
+                                     for p in clipados]
+                        poligono = QPolygonF([QPointF(x, y) for x, y in coords_vp])
+                        painter.setBrush(QBrush(QColor(obj.cor)))
+                        painter.drawPolygon(poligono)
+                        painter.setBrush(QBrush())
                 else:
-                    for i in range(len(coords_vp) - 1):
-                        x1, y1 = coords_vp[i]
-                        x2, y2 = coords_vp[i + 1]
-                        painter.drawLine(int(x1), int(y1), int(x2), int(y2))
-                    x_inicio, y_inicio = coords_vp[0]
-                    x_fim, y_fim = coords_vp[-1]
-                    painter.drawLine(int(x_fim), int(y_fim), int(x_inicio), int(y_inicio))
+                    # Wireframe → clipa cada aresta com o algoritmo de reta escolhido
+                    n = len(coords_scn)
+                    for i in range(n):
+                        pa = coords_scn[i]
+                        pb = coords_scn[(i + 1) % n]
+                        resultado = fn_clip(pa, pb)
+                        if resultado:
+                            p1c, p2c = resultado
+                            x1, y1 = self.viewport.viewport_transform_scn(p1c)
+                            x2, y2 = self.viewport.viewport_transform_scn(p2c)
+                            painter.drawLine(int(x1), int(y1), int(x2), int(y2))

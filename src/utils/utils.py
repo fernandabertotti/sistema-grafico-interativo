@@ -14,7 +14,15 @@ VP_X_MIN = 0
 VP_Y_MIN = 0
 VP_X_MAX = 800
 VP_Y_MAX = 600
+VP_MARGIN = 10
 
 # Espessura
 POINT_THICKNESS = 5
 LINE_THICKNESS = 3
+
+# Clipping
+INSIDE = 0
+LEFT = 1
+RIGHT = 2
+BOTTOM = 4
+TOP = 8

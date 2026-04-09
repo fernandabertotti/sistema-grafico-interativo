@@ -450,6 +450,25 @@ class MainWindow(QMainWindow):
         painel_layout.addWidget(grupo_nav)
         painel_layout.addStretch()
 
+           
+        # --- Grupo 3: Clipping de Reta ---
+        grupo_clip = QGroupBox("Clipping de Reta")
+        clipping_layout = QVBoxLayout(grupo_clip)
+
+        self.radio_cs = QRadioButton("Cohen-Sutherland")
+        self.radio_lb = QRadioButton("Liang-Barsky")
+        self.radio_cs.setChecked(True)
+
+        # Conecta os radios ao canvas para ele saber qual algoritmo usar
+        self.radio_cs.toggled.connect(self._atualizar_algoritmo_clip)
+        self.radio_lb.toggled.connect(self._atualizar_algoritmo_clip)
+
+        clipping_layout.addWidget(self.radio_cs)
+        clipping_layout.addWidget(self.radio_lb)
+        painel_layout.addWidget(grupo_clip)
+        painel_layout.addStretch()
+
+
         # DIREITA: Canvas (Viewport)
         grupo_viewport = QGroupBox("Viewport")
 
@@ -683,3 +702,11 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Sucesso", f"Mundo exportado para:\n{filepath}")
         except Exception as e:
             QMessageBox.warning(self, "Erro", f"Erro ao exportar .obj:\n{str(e)}")
+
+    def _atualizar_algoritmo_clip(self):
+        """Passa o algoritmo escolhido para o canvas e força redesenho."""
+        if self.radio_cs.isChecked():
+            self.canvas.algoritmo_clip_reta = "CS"
+        else:
+            self.canvas.algoritmo_clip_reta = "LB"
+        self.canvas.update()
