@@ -431,14 +431,14 @@ class MainWindow(QMainWindow):
         rot_layout.addWidget(self.input_rot_window)
         rot_layout.addWidget(QLabel("°"))
 
-        btn_rot_esq = QPushButton("⤵")
+        btn_rot_esq = QPushButton("↷")
         btn_rot_esq.setFixedWidth(30)
         btn_rot_esq.clicked.connect(self.rotacionar_window_esquerda)
-        btn_rot_dir = QPushButton("⤴")
+        btn_rot_dir = QPushButton("↶")
         btn_rot_dir.setFixedWidth(30)
         btn_rot_dir.clicked.connect(self.rotacionar_window_direita)
-        rot_layout.addWidget(btn_rot_esq)
         rot_layout.addWidget(btn_rot_dir)
+        rot_layout.addWidget(btn_rot_esq)
         rot_layout.addStretch()
 
         layout_nav.addLayout(rot_layout)
