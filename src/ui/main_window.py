@@ -2,7 +2,8 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QListWidget, QLineEdit, QLabel, QMessageBox,
                              QGridLayout, QGroupBox, QDialog, QTabWidget,
-                             QMenu, QButtonGroup, QRadioButton, QComboBox, QFileDialog)
+                             QMenu, QButtonGroup, QRadioButton, QComboBox, QFileDialog,
+                             QCheckBox)
 from PyQt6.QtCore import Qt
 from src.ui.canvas import Canvas
 from src.core.geometry import Ponto, Reta, Wireframe
@@ -15,7 +16,7 @@ from src.core.obj_io import salvar_obj, carregar_obj
 class JanelaObjetoDialog(QDialog):
     """Janela modal para adicionar ou editar objetos"""
 
-    def __init__(self, parent=None, nome="", coords="", cor_atual="#000000", modo_edicao=False):
+    def __init__(self, parent=None, nome="", coords="", cor_atual="#000000", modo_edicao=False, preenchido=False):
         super().__init__(parent)
         self.setWindowTitle("Propriedades do Objeto" if modo_edicao else "Novo Objeto")
         self.setFixedSize(500, 480)
@@ -70,6 +71,18 @@ class JanelaObjetoDialog(QDialog):
 
         layout_cores.addStretch()
         layout_geometria.addLayout(layout_cores)
+
+        # Checkbox de preenchimento (visível apenas para wireframes)
+        self.check_preenchido = QCheckBox("Preencher wireframe com cor")
+        self.check_preenchido.setChecked(preenchido)
+        self.check_preenchido.setVisible(False)
+        layout_geometria.addWidget(self.check_preenchido)
+
+        # Atualiza visibilidade do checkbox ao editar coordenadas
+        self.input_coords.textChanged.connect(self._atualizar_check_preenchido)
+        if coords:
+            self._atualizar_check_preenchido(coords)
+
         layout_geometria.addStretch()
 
         self.abas.addTab(self.aba_geometria, "Geometria")
@@ -254,10 +267,18 @@ class JanelaObjetoDialog(QDialog):
         self.apagar_solicitado = True
         self.accept()
 
+    def _atualizar_check_preenchido(self, texto):
+        """Mostra o checkbox de preenchimento apenas quando há mais de 2 coordenadas."""
+        try:
+            coords = list(eval(f"[{texto}]"))
+            self.check_preenchido.setVisible(len(coords) > 2)
+        except:
+            self.check_preenchido.setVisible(False)
+
     def obter_dados(self):
         id_cor = self.grupo_cores.checkedId()
         cor_selecionada = self.lista_cores[id_cor] if id_cor != -1 else "#000000"
-        return self.input_nome.text(), self.input_coords.text(), cor_selecionada
+        return self.input_nome.text(), self.input_coords.text(), cor_selecionada, self.check_preenchido.isChecked()
 
     def obter_transformacoes(self):
         """Retorna a lista de transformações acumuladas."""
@@ -274,7 +295,7 @@ class MainWindow(QMainWindow):
         self.viewport = viewport
         self.transform = Transform()
 
-        self.setWindowTitle("Sistema Grafico Interativo - V1.3")
+        self.setWindowTitle("Sistema Grafico Interativo - V1.4")
         self.setGeometry(100, 100, 1050, 650)
 
         self.aplicar_tema()
@@ -410,14 +431,14 @@ class MainWindow(QMainWindow):
         rot_layout.addWidget(self.input_rot_window)
         rot_layout.addWidget(QLabel("°"))
 
-        btn_rot_esq = QPushButton("↺")
+        btn_rot_esq = QPushButton("↷")
         btn_rot_esq.setFixedWidth(30)
         btn_rot_esq.clicked.connect(self.rotacionar_window_esquerda)
-        btn_rot_dir = QPushButton("↻")
+        btn_rot_dir = QPushButton("↶")
         btn_rot_dir.setFixedWidth(30)
         btn_rot_dir.clicked.connect(self.rotacionar_window_direita)
-        rot_layout.addWidget(btn_rot_esq)
         rot_layout.addWidget(btn_rot_dir)
+        rot_layout.addWidget(btn_rot_esq)
         rot_layout.addStretch()
 
         layout_nav.addLayout(rot_layout)
@@ -428,6 +449,25 @@ class MainWindow(QMainWindow):
 
         painel_layout.addWidget(grupo_nav)
         painel_layout.addStretch()
+
+           
+        # --- Grupo 3: Clipping de Reta ---
+        grupo_clip = QGroupBox("Clipping de Reta")
+        clipping_layout = QVBoxLayout(grupo_clip)
+
+        self.radio_cs = QRadioButton("Cohen-Sutherland")
+        self.radio_lb = QRadioButton("Liang-Barsky")
+        self.radio_cs.setChecked(True)
+
+        # Conecta os radios ao canvas para ele saber qual algoritmo usar
+        self.radio_cs.toggled.connect(self._atualizar_algoritmo_clip)
+        self.radio_lb.toggled.connect(self._atualizar_algoritmo_clip)
+
+        clipping_layout.addWidget(self.radio_cs)
+        clipping_layout.addWidget(self.radio_lb)
+        painel_layout.addWidget(grupo_clip)
+        painel_layout.addStretch()
+
 
         # DIREITA: Canvas (Viewport)
         grupo_viewport = QGroupBox("Viewport")
@@ -450,8 +490,8 @@ class MainWindow(QMainWindow):
     def abrir_dialogo_novo_objeto(self):
         dialogo = JanelaObjetoDialog(self)
         if dialogo.exec():
-            nome, coords_str, cor = dialogo.obter_dados()
-            self.processar_adicao_objeto(nome, coords_str, cor)
+            nome, coords_str, cor, preenchido = dialogo.obter_dados()
+            self.processar_adicao_objeto(nome, coords_str, cor, preenchido=preenchido)
 
     def editar_objeto_selecionado(self):
         item_atual = self.list_widget.currentItem()
@@ -465,26 +505,30 @@ class MainWindow(QMainWindow):
 
         coords_str = ", ".join([str(pt) for pt in obj_ref.pontos])
 
+        preenchido_atual = getattr(obj_ref, 'preenchido', False)
         dialogo = JanelaObjetoDialog(self, nome=obj_ref.nome, coords=coords_str, cor_atual=obj_ref.cor,
-                                     modo_edicao=True)
+                                     modo_edicao=True, preenchido=preenchido_atual)
         if dialogo.exec():
             if dialogo.apagar_solicitado:
                 self.apagar_objeto(item_atual)
             else:
-                _, novas_coords_str, nova_cor = dialogo.obter_dados()
+                _, novas_coords_str, nova_cor, preenchido = dialogo.obter_dados()
 
                 # Aplica transformações acumuladas (se houver)
                 transformacoes = dialogo.obter_transformacoes()
                 if transformacoes:
                     novos_pontos = Transform.aplicar_lista_transformacoes(obj_ref.pontos, transformacoes)
                     obj_ref.pontos = novos_pontos
-                    # Atualiza o campo de coordenadas para refletir a transformação
                     obj_ref.cor = nova_cor
+                    if hasattr(obj_ref, 'preenchido'):
+                        obj_ref.preenchido = preenchido
                     self.canvas.update()
                     return
 
-                # Atualiza cor
+                # Atualiza cor e preenchimento
                 obj_ref.cor = nova_cor
+                if hasattr(obj_ref, 'preenchido'):
+                    obj_ref.preenchido = preenchido
 
                 # Atualiza coordenadas se o usuário editou manualmente
                 try:
@@ -492,7 +536,23 @@ class MainWindow(QMainWindow):
                     for x, y in coords_editadas:
                         float(x)
                         float(y)
-                    obj_ref.pontos = coords_editadas
+
+                    # Reclassifica o objeto se a quantidade de coordenadas mudou o tipo
+                    novo_tipo = "Ponto" if len(coords_editadas) == 1 else \
+                                "Reta" if len(coords_editadas) == 2 else "Wireframe"
+
+                    if novo_tipo != obj_ref.tipo:
+                        self.display_file.remover_objeto(obj_ref.nome)
+                        if novo_tipo == "Ponto":
+                            novo_obj = Ponto(obj_ref.nome, coords_editadas, nova_cor)
+                        elif novo_tipo == "Reta":
+                            novo_obj = Reta(obj_ref.nome, coords_editadas, nova_cor)
+                        else:
+                            novo_obj = Wireframe(obj_ref.nome, coords_editadas, nova_cor, preenchido=preenchido)
+                        self.display_file.adicionar_objeto(novo_obj)
+                        item_atual.setText(f"{obj_ref.nome} [{novo_tipo}]")
+                    else:
+                        obj_ref.pontos = coords_editadas
                 except:
                     pass
 
@@ -522,7 +582,7 @@ class MainWindow(QMainWindow):
 
     # --- Lógica de Negócio ---
 
-    def processar_adicao_objeto(self, nome, coords_str, cor, item_lista=None):
+    def processar_adicao_objeto(self, nome, coords_str, cor, item_lista=None, preenchido=False):
         if not nome or not coords_str:
             QMessageBox.warning(self, "Erro", "Preencha todos os campos.")
             return
@@ -539,7 +599,7 @@ class MainWindow(QMainWindow):
             elif len(coords) == 2:
                 novo_obj = Reta(nome, coords, cor)
             elif len(coords) > 2:
-                novo_obj = Wireframe(nome, coords, cor)
+                novo_obj = Wireframe(nome, coords, cor, preenchido=preenchido)
             else:
                 raise ValueError("Coordenadas insuficientes")
 
@@ -642,3 +702,11 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Sucesso", f"Mundo exportado para:\n{filepath}")
         except Exception as e:
             QMessageBox.warning(self, "Erro", f"Erro ao exportar .obj:\n{str(e)}")
+
+    def _atualizar_algoritmo_clip(self):
+        """Passa o algoritmo escolhido para o canvas e força redesenho."""
+        if self.radio_cs.isChecked():
+            self.canvas.algoritmo_clip_reta = "CS"
+        else:
+            self.canvas.algoritmo_clip_reta = "LB"
+        self.canvas.update()
