@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QCheckBox)
 from PyQt6.QtCore import Qt
 from src.ui.canvas import Canvas
-from src.core.geometry import Ponto, Reta, Wireframe
+from src.core.geometry import Ponto, Reta, Wireframe, Curva2D
 from src.core.transform import Transform
 from src.core.obj_io import salvar_obj, carregar_obj
 
@@ -16,7 +16,7 @@ from src.core.obj_io import salvar_obj, carregar_obj
 class JanelaObjetoDialog(QDialog):
     """Janela modal para adicionar ou editar objetos"""
 
-    def __init__(self, parent=None, nome="", coords="", cor_atual="#000000", modo_edicao=False, preenchido=False):
+    def __init__(self, parent=None, nome="", coords="", cor_atual="#000000", modo_edicao=False, preenchido=False, tipo_atual="Automático"):
         super().__init__(parent)
         self.setWindowTitle("Propriedades do Objeto" if modo_edicao else "Novo Objeto")
         self.setFixedSize(500, 480)
@@ -40,6 +40,15 @@ class JanelaObjetoDialog(QDialog):
             self.input_nome.setReadOnly(True)
             self.input_nome.setStyleSheet("background-color: #E0E0E0;")
         layout_geometria.addWidget(self.input_nome)
+
+        # Seletor de tipo
+        layout_geometria.addWidget(QLabel("Tipo do objeto:"))
+        self.combo_tipo_objeto = QComboBox()
+        self.combo_tipo_objeto.addItems(["Automático", "Curva de Bézier"])
+        if tipo_atual == "Curva2D":
+            self.combo_tipo_objeto.setCurrentText("Curva de Bézier")
+        self.combo_tipo_objeto.currentIndexChanged.connect(self._atualizar_visibilidade_por_tipo)
+        layout_geometria.addWidget(self.combo_tipo_objeto)
 
         layout_geometria.addWidget(QLabel("Coordenadas [(x1, y1), (x2, y2)...]:"))
         self.input_coords = QLineEdit(coords)
@@ -268,17 +277,26 @@ class JanelaObjetoDialog(QDialog):
         self.accept()
 
     def _atualizar_check_preenchido(self, texto):
-        """Mostra o checkbox de preenchimento apenas quando há mais de 2 coordenadas."""
+        """Mostra o checkbox de preenchimento apenas para wireframes (>2 coords, tipo Automático)."""
+        if self.combo_tipo_objeto.currentText() == "Curva de Bézier":
+            self.check_preenchido.setVisible(False)
+            return
         try:
             coords = list(eval(f"[{texto}]"))
             self.check_preenchido.setVisible(len(coords) > 2)
         except:
             self.check_preenchido.setVisible(False)
 
+    def _atualizar_visibilidade_por_tipo(self, _index):
+        """Re-avalia a visibilidade do checkbox quando o tipo muda."""
+        self._atualizar_check_preenchido(self.input_coords.text())
+
     def obter_dados(self):
         id_cor = self.grupo_cores.checkedId()
         cor_selecionada = self.lista_cores[id_cor] if id_cor != -1 else "#000000"
-        return self.input_nome.text(), self.input_coords.text(), cor_selecionada, self.check_preenchido.isChecked()
+        tipo = self.combo_tipo_objeto.currentText()
+        return (self.input_nome.text(), self.input_coords.text(), cor_selecionada,
+                self.check_preenchido.isChecked(), tipo)
 
     def obter_transformacoes(self):
         """Retorna a lista de transformações acumuladas."""
@@ -295,7 +313,7 @@ class MainWindow(QMainWindow):
         self.viewport = viewport
         self.transform = Transform()
 
-        self.setWindowTitle("Sistema Grafico Interativo - V1.4")
+        self.setWindowTitle("Sistema Grafico Interativo - V1.5")
         self.setGeometry(100, 100, 1050, 650)
 
         self.aplicar_tema()
@@ -490,8 +508,8 @@ class MainWindow(QMainWindow):
     def abrir_dialogo_novo_objeto(self):
         dialogo = JanelaObjetoDialog(self)
         if dialogo.exec():
-            nome, coords_str, cor, preenchido = dialogo.obter_dados()
-            self.processar_adicao_objeto(nome, coords_str, cor, preenchido=preenchido)
+            nome, coords_str, cor, preenchido, tipo = dialogo.obter_dados()
+            self.processar_adicao_objeto(nome, coords_str, cor, preenchido=preenchido, tipo=tipo)
 
     def editar_objeto_selecionado(self):
         item_atual = self.list_widget.currentItem()
@@ -507,12 +525,12 @@ class MainWindow(QMainWindow):
 
         preenchido_atual = getattr(obj_ref, 'preenchido', False)
         dialogo = JanelaObjetoDialog(self, nome=obj_ref.nome, coords=coords_str, cor_atual=obj_ref.cor,
-                                     modo_edicao=True, preenchido=preenchido_atual)
+                                     modo_edicao=True, preenchido=preenchido_atual, tipo_atual=obj_ref.tipo)
         if dialogo.exec():
             if dialogo.apagar_solicitado:
                 self.apagar_objeto(item_atual)
             else:
-                _, novas_coords_str, nova_cor, preenchido = dialogo.obter_dados()
+                _, novas_coords_str, nova_cor, preenchido, tipo_escolhido = dialogo.obter_dados()
 
                 # Aplica transformações acumuladas (se houver)
                 transformacoes = dialogo.obter_transformacoes()
@@ -537,9 +555,18 @@ class MainWindow(QMainWindow):
                         float(x)
                         float(y)
 
-                    # Reclassifica o objeto se a quantidade de coordenadas mudou o tipo
-                    novo_tipo = "Ponto" if len(coords_editadas) == 1 else \
-                                "Reta" if len(coords_editadas) == 2 else "Wireframe"
+                    # Determina o novo tipo conforme a escolha do usuário
+                    if tipo_escolhido == "Curva de Bézier":
+                        if len(coords_editadas) < 4 or (len(coords_editadas) - 1) % 3 != 0:
+                            QMessageBox.warning(self, "Erro",
+                                f"Curva de Bézier precisa ter 3n+1 pontos (4, 7, 10, 13...).\n"
+                                f"Você informou {len(coords_editadas)} pontos. Alterações de coordenadas ignoradas.")
+                            self.canvas.update()
+                            return
+                        novo_tipo = "Curva2D"
+                    else:
+                        novo_tipo = "Ponto" if len(coords_editadas) == 1 else \
+                                    "Reta" if len(coords_editadas) == 2 else "Wireframe"
 
                     if novo_tipo != obj_ref.tipo:
                         self.display_file.remover_objeto(obj_ref.nome)
@@ -547,6 +574,8 @@ class MainWindow(QMainWindow):
                             novo_obj = Ponto(obj_ref.nome, coords_editadas, nova_cor)
                         elif novo_tipo == "Reta":
                             novo_obj = Reta(obj_ref.nome, coords_editadas, nova_cor)
+                        elif novo_tipo == "Curva2D":
+                            novo_obj = Curva2D(obj_ref.nome, coords_editadas, nova_cor)
                         else:
                             novo_obj = Wireframe(obj_ref.nome, coords_editadas, nova_cor, preenchido=preenchido)
                         self.display_file.adicionar_objeto(novo_obj)
@@ -582,7 +611,7 @@ class MainWindow(QMainWindow):
 
     # --- Lógica de Negócio ---
 
-    def processar_adicao_objeto(self, nome, coords_str, cor, item_lista=None, preenchido=False):
+    def processar_adicao_objeto(self, nome, coords_str, cor, item_lista=None, preenchido=False, tipo="Automático"):
         if not nome or not coords_str:
             QMessageBox.warning(self, "Erro", "Preencha todos os campos.")
             return
@@ -594,14 +623,27 @@ class MainWindow(QMainWindow):
                 float(x)
                 float(y)
 
-            if len(coords) == 1:
-                novo_obj = Ponto(nome, coords, cor)
-            elif len(coords) == 2:
-                novo_obj = Reta(nome, coords, cor)
-            elif len(coords) > 2:
-                novo_obj = Wireframe(nome, coords, cor, preenchido=preenchido)
+            if tipo == "Curva de Bézier":
+                if len(coords) < 4:
+                    QMessageBox.warning(self, "Erro",
+                        "Curva de Bézier precisa de pelo menos 4 pontos de controle.")
+                    return
+                if (len(coords) - 1) % 3 != 0:
+                    QMessageBox.warning(self, "Erro",
+                        f"Curva de Bézier precisa ter 3n+1 pontos de controle (4, 7, 10, 13...).\n"
+                        f"Você informou {len(coords)} pontos.")
+                    return
+                novo_obj = Curva2D(nome, coords, cor)
             else:
-                raise ValueError("Coordenadas insuficientes")
+                # Automático: classifica pela quantidade
+                if len(coords) == 1:
+                    novo_obj = Ponto(nome, coords, cor)
+                elif len(coords) == 2:
+                    novo_obj = Reta(nome, coords, cor)
+                elif len(coords) > 2:
+                    novo_obj = Wireframe(nome, coords, cor, preenchido=preenchido)
+                else:
+                    raise ValueError("Coordenadas insuficientes")
 
             self.display_file.adicionar_objeto(novo_obj)
             texto_exibicao = f"{nome} [{novo_obj.tipo}]"

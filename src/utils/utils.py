@@ -26,3 +26,6 @@ LEFT = 1
 RIGHT = 2
 BOTTOM = 4
 TOP = 8
+
+# Curvas de Bézier
+BEZIER_STEPS = 100  # passos de amostragem por segmento cúbico
