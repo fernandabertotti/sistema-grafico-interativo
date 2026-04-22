@@ -21,3 +21,9 @@ class Wireframe(ObjetoGrafico):
     def __init__(self, nome, pontos, cor="#000000", preenchido=False):
         super().__init__(nome, pontos, "Wireframe", cor)
         self.preenchido = preenchido
+
+
+class Curva2D(ObjetoGrafico):
+    """Curva de Bézier cúbica por partes. `pontos` são os pontos de controle (3n+1)."""
+    def __init__(self, nome, pontos, cor="#000000"):
+        super().__init__(nome, pontos, "Curva2D", cor)

@@ -1,13 +1,14 @@
 from PyQt6.QtWidgets import QWidget
 from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QPolygonF
 from PyQt6.QtCore import QPointF
-from src.utils.utils import VP_MARGIN
+from src.utils.utils import VP_MARGIN, BEZIER_STEPS
 from src.core.clipping import (
     clip_ponto,
     clip_reta_cohen_sutherland,   # ou liang_barsky — escolha uma e use radio button na UI
     clip_reta_liang_barsky,
     clip_poligono_sutherland_hodgman,
 )
+from src.core.bezier import gerar_pontos_curva
 
 class Canvas(QWidget):
     def __init__(self, display_file, window, viewport):
@@ -130,3 +131,21 @@ class Canvas(QWidget):
                             x1, y1 = self.viewport.viewport_transform_scn(p1c)
                             x2, y2 = self.viewport.viewport_transform_scn(p2c)
                             painter.drawLine(int(x1), int(y1), int(x2), int(y2))
+
+            elif obj.tipo == "Curva2D":
+                # 1. Gera pontos amostrados em coordenadas do mundo
+                pontos_mundo = gerar_pontos_curva(obj.pontos, BEZIER_STEPS)
+                # 2. Converte cada ponto para SCN
+                pontos_scn = [self.window.generate_scn(p) for p in pontos_mundo]
+                # 3. Clipping por ponto + traço entre pontos visíveis consecutivos.
+                #    Quando um ponto é clipado, zera 'anterior' para quebrar o traço.
+                anterior_vp = None
+                for p_scn in pontos_scn:
+                    if clip_ponto(p_scn):
+                        x, y = self.viewport.viewport_transform_scn(p_scn)
+                        if anterior_vp is not None:
+                            ax, ay = anterior_vp
+                            painter.drawLine(int(ax), int(ay), int(x), int(y))
+                        anterior_vp = (x, y)
+                    else:
+                        anterior_vp = None
