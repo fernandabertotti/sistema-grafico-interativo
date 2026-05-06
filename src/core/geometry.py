@@ -27,3 +27,8 @@ class Curva2D(ObjetoGrafico):
     """Curva de Bézier cúbica por partes. `pontos` são os pontos de controle (3n+1)."""
     def __init__(self, nome, pontos, cor="#000000"):
         super().__init__(nome, pontos, "Curva2D", cor)
+
+class BSpline2D(ObjetoGrafico):
+    """B-Spline cúbica uniforme por Forward Differences. `pontos` são os pontos de controle (>= 4)."""
+    def __init__(self, nome, pontos, cor="#000000"):
+        super().__init__(nome, pontos, "BSpline2D", cor)

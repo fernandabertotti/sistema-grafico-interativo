@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QCheckBox)
 from PyQt6.QtCore import Qt
 from src.ui.canvas import Canvas
-from src.core.geometry import Ponto, Reta, Wireframe, Curva2D
+from src.core.geometry import Ponto, Reta, Wireframe, Curva2D, BSpline2D
 from src.core.transform import Transform
 from src.core.obj_io import salvar_obj, carregar_obj
 
@@ -44,9 +44,11 @@ class JanelaObjetoDialog(QDialog):
         # Seletor de tipo
         layout_geometria.addWidget(QLabel("Tipo do objeto:"))
         self.combo_tipo_objeto = QComboBox()
-        self.combo_tipo_objeto.addItems(["Automático", "Curva de Bézier"])
+        self.combo_tipo_objeto.addItems(["Automático", "Curva de Bézier", "B-Spline"])
         if tipo_atual == "Curva2D":
             self.combo_tipo_objeto.setCurrentText("Curva de Bézier")
+        if tipo_atual == "BSpline2D":
+            self.combo_tipo_objeto.setCurrentText("B-Spline")
         self.combo_tipo_objeto.currentIndexChanged.connect(self._atualizar_visibilidade_por_tipo)
         layout_geometria.addWidget(self.combo_tipo_objeto)
 
@@ -278,7 +280,8 @@ class JanelaObjetoDialog(QDialog):
 
     def _atualizar_check_preenchido(self, texto):
         """Mostra o checkbox de preenchimento apenas para wireframes (>2 coords, tipo Automático)."""
-        if self.combo_tipo_objeto.currentText() == "Curva de Bézier":
+        tipo = self.combo_tipo_objeto.currentText()
+        if tipo in ("Curva de Bézier", "B-Spline"):
             self.check_preenchido.setVisible(False)
             return
         try:
@@ -313,7 +316,7 @@ class MainWindow(QMainWindow):
         self.viewport = viewport
         self.transform = Transform()
 
-        self.setWindowTitle("Sistema Grafico Interativo - V1.5")
+        self.setWindowTitle("Sistema Grafico Interativo - V1.6")
         self.setGeometry(100, 100, 1050, 650)
 
         self.aplicar_tema()
@@ -468,7 +471,6 @@ class MainWindow(QMainWindow):
         painel_layout.addWidget(grupo_nav)
         painel_layout.addStretch()
 
-           
         # --- Grupo 3: Clipping de Reta ---
         grupo_clip = QGroupBox("Clipping de Reta")
         clipping_layout = QVBoxLayout(grupo_clip)
@@ -477,7 +479,6 @@ class MainWindow(QMainWindow):
         self.radio_lb = QRadioButton("Liang-Barsky")
         self.radio_cs.setChecked(True)
 
-        # Conecta os radios ao canvas para ele saber qual algoritmo usar
         self.radio_cs.toggled.connect(self._atualizar_algoritmo_clip)
         self.radio_lb.toggled.connect(self._atualizar_algoritmo_clip)
 
@@ -485,7 +486,6 @@ class MainWindow(QMainWindow):
         clipping_layout.addWidget(self.radio_lb)
         painel_layout.addWidget(grupo_clip)
         painel_layout.addStretch()
-
 
         # DIREITA: Canvas (Viewport)
         grupo_viewport = QGroupBox("Viewport")
@@ -564,6 +564,14 @@ class MainWindow(QMainWindow):
                             self.canvas.update()
                             return
                         novo_tipo = "Curva2D"
+                    elif tipo_escolhido == "B-Spline":
+                        if len(coords_editadas) < 4:
+                            QMessageBox.warning(self, "Erro",
+                                f"B-Spline precisa de pelo menos 4 pontos de controle.\n"
+                                f"Você informou {len(coords_editadas)} pontos. Alterações de coordenadas ignoradas.")
+                            self.canvas.update()
+                            return
+                        novo_tipo = "BSpline2D"
                     else:
                         novo_tipo = "Ponto" if len(coords_editadas) == 1 else \
                                     "Reta" if len(coords_editadas) == 2 else "Wireframe"
@@ -576,6 +584,8 @@ class MainWindow(QMainWindow):
                             novo_obj = Reta(obj_ref.nome, coords_editadas, nova_cor)
                         elif novo_tipo == "Curva2D":
                             novo_obj = Curva2D(obj_ref.nome, coords_editadas, nova_cor)
+                        elif novo_tipo == "BSpline2D":
+                            novo_obj = BSpline2D(obj_ref.nome, coords_editadas, nova_cor)
                         else:
                             novo_obj = Wireframe(obj_ref.nome, coords_editadas, nova_cor, preenchido=preenchido)
                         self.display_file.adicionar_objeto(novo_obj)
@@ -634,6 +644,12 @@ class MainWindow(QMainWindow):
                         f"Você informou {len(coords)} pontos.")
                     return
                 novo_obj = Curva2D(nome, coords, cor)
+            elif tipo == "B-Spline":
+                if len(coords) < 4:
+                    QMessageBox.warning(self, "Erro",
+                        "B-Spline precisa de pelo menos 4 pontos de controle.")
+                    return
+                novo_obj = BSpline2D(nome, coords, cor)
             else:
                 # Automático: classifica pela quantidade
                 if len(coords) == 1:

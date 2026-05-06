@@ -2,6 +2,7 @@ from PyQt6.QtWidgets import QWidget
 from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QPolygonF
 from PyQt6.QtCore import QPointF
 from src.utils.utils import VP_MARGIN, BEZIER_STEPS
+from src.core.bspline import gerar_pontos_bspline
 from src.core.clipping import (
     clip_ponto,
     clip_reta_cohen_sutherland,   # ou liang_barsky — escolha uma e use radio button na UI
@@ -139,6 +140,20 @@ class Canvas(QWidget):
                 pontos_scn = [self.window.generate_scn(p) for p in pontos_mundo]
                 # 3. Clipping por ponto + traço entre pontos visíveis consecutivos.
                 #    Quando um ponto é clipado, zera 'anterior' para quebrar o traço.
+                anterior_vp = None
+                for p_scn in pontos_scn:
+                    if clip_ponto(p_scn):
+                        x, y = self.viewport.viewport_transform_scn(p_scn)
+                        if anterior_vp is not None:
+                            ax, ay = anterior_vp
+                            painter.drawLine(int(ax), int(ay), int(x), int(y))
+                        anterior_vp = (x, y)
+                    else:
+                        anterior_vp = None
+
+            elif obj.tipo == "BSpline2D":
+                pontos_mundo = gerar_pontos_bspline(obj.pontos, BEZIER_STEPS)
+                pontos_scn = [self.window.generate_scn(p) for p in pontos_mundo]
                 anterior_vp = None
                 for p_scn in pontos_scn:
                     if clip_ponto(p_scn):
