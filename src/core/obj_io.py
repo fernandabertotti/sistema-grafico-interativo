@@ -2,28 +2,21 @@
 """Módulo para leitura e escrita de arquivos Wavefront .obj.
 
 Formato suportado:
-  - Vértices: v x y z  (z é ignorado/setado como 0 em 2D)
+  - Vértices: v x y z
   - Pontos: p v1
   - Linhas: l v1 v2 ...
   - Faces: f v1 v2 v3 ...  (wireframes)
   - Objetos: o nome
   - Cores: usercor r g b         (extensão customizada — cor RGB)
-  - Tipo: usertype <tipo>        (extensão customizada — Curva2D, BSpline2D, Wireframe)
+  - Tipo: usertype <tipo>        (extensão customizada — Curva2D, BSpline2D, Wireframe, Objeto3D)
   - Preenchimento: userfill 1|0  (extensão customizada — wireframe preenchido)
   - Grupos: g nome  (tratados como sinônimo de 'o')
 
-Cada objeto no display file gera um bloco:
-  o nome_do_objeto
-  usercor r g b
-  usertype <tipo>          (apenas para Curva2D e BSpline2D; omitido para tipos nativos)
-  userfill 1|0             (apenas para Wireframe)
-  v x1 y1 0.0
-  v x2 y2 0.0
-  ...
-  l/p/f/curva/bspline  (conforme tipo)
+Objetos 2D escrevem z=0.0; Objeto3D escreve z real e usa 'usertype Objeto3D'.
+Para Objeto3D, cada segmento gera dois vértices consecutivos + uma linha 'l i j'.
 """
 
-from src.core.geometry import Ponto, Reta, Wireframe, Curva2D, BSpline2D
+from src.core.geometry import Ponto, Reta, Wireframe, Curva2D, BSpline2D, Ponto3D, Objeto3D
 
 
 class DescritorOBJ:
@@ -31,34 +24,40 @@ class DescritorOBJ:
 
     @staticmethod
     def objeto_para_obj(objeto, offset_vertice=0):
-        """Converte um ObjetoGrafico para linhas no formato .obj."""
-        linhas = []
+        """Converte um objeto gráfico para linhas no formato .obj.
 
-        # Nome do objeto
+        Retorna (linhas, num_vertices_escritos).
+        """
+        linhas = []
         linhas.append(f"o {objeto.nome}")
 
-        # Cor (extensão customizada)
         r, g, b = DescritorOBJ._hex_para_rgb_normalizado(objeto.cor)
         linhas.append(f"usercor {r:.4f} {g:.4f} {b:.4f}")
 
-        # Tipo customizado (necessário para Curva2D e BSpline2D, que não têm
-        # equivalente nativo no formato .obj)
+        if objeto.tipo == "Objeto3D":
+            linhas.append("usertype Objeto3D")
+            for p1, p2 in objeto.segmentos:
+                linhas.append(f"v {p1.x} {p1.y} {p1.z}")
+                linhas.append(f"v {p2.x} {p2.y} {p2.z}")
+            for i in range(len(objeto.segmentos)):
+                i1 = offset_vertice + 2 * i + 1
+                i2 = offset_vertice + 2 * i + 2
+                linhas.append(f"l {i1} {i2}")
+            return linhas, len(objeto.segmentos) * 2
+
         if objeto.tipo in ("Curva2D", "BSpline2D"):
             linhas.append(f"usertype {objeto.tipo}")
 
-        # Preenchimento (apenas wireframes)
         if objeto.tipo == "Wireframe":
             preenchido = 1 if getattr(objeto, 'preenchido', False) else 0
             linhas.append(f"userfill {preenchido}")
 
-        # Vértices
         for (x, y) in objeto.pontos:
             linhas.append(f"v {x} {y} 0.0")
 
         num_vertices = len(objeto.pontos)
         indices = " ".join(str(offset_vertice + i + 1) for i in range(num_vertices))
 
-        # Elemento geométrico
         if objeto.tipo == "Ponto":
             linhas.append(f"p {offset_vertice + 1}")
         elif objeto.tipo == "Reta":
@@ -66,8 +65,6 @@ class DescritorOBJ:
         elif objeto.tipo == "Wireframe":
             linhas.append(f"f {indices}")
         elif objeto.tipo == "Curva2D":
-            # Curvas não têm primitiva nativa no .obj — usamos 'curva' como
-            # marcador customizado. O loader reconhece essa palavra-chave.
             linhas.append(f"curva {indices}")
         elif objeto.tipo == "BSpline2D":
             linhas.append(f"bspline {indices}")
@@ -76,7 +73,6 @@ class DescritorOBJ:
 
     @staticmethod
     def _hex_para_rgb_normalizado(hex_cor):
-        """Converte cor hex (#RRGGBB) para tupla normalizada (0-1)."""
         hex_cor = hex_cor.lstrip("#")
         r = int(hex_cor[0:2], 16) / 255.0
         g = int(hex_cor[2:4], 16) / 255.0
@@ -85,7 +81,6 @@ class DescritorOBJ:
 
     @staticmethod
     def _rgb_normalizado_para_hex(r, g, b):
-        """Converte tupla normalizada (0-1) para cor hex (#RRGGBB)."""
         ri = max(0, min(255, int(round(r * 255))))
         gi = max(0, min(255, int(round(g * 255))))
         bi = max(0, min(255, int(round(b * 255))))
@@ -110,14 +105,30 @@ def salvar_obj(filepath, display_file):
 
 
 def carregar_obj(filepath):
-    """Carrega objetos de um arquivo .obj e retorna lista de ObjetoGrafico."""
-    vertices_globais = []
+    """Carrega objetos de um arquivo .obj e retorna lista de objetos gráficos.
+
+    Suporta objetos 2D (Ponto, Reta, Wireframe, Curva2D, BSpline2D) e 3D (Objeto3D).
+    Vértices são armazenados como (x, y, z); objetos 2D usam apenas (x, y).
+    """
+    vertices_globais = []   # (x, y, z)
     objetos = []
 
     nome_atual = None
     cor_atual = "#000000"
-    tipo_atual = None    # definido por 'usertype' quando presente
-    fill_atual = False   # definido por 'userfill' quando presente
+    tipo_atual = None
+    fill_atual = False
+
+    # Estado para acumular segmentos de Objeto3D (múltiplos 'l' por objeto)
+    nome_3d = None
+    cor_3d = "#000000"
+    segmentos_3d = []
+
+    def _finalizar_objeto_3d():
+        nonlocal segmentos_3d, nome_3d, cor_3d
+        if segmentos_3d and nome_3d:
+            objetos.append(Objeto3D(nome_3d, list(segmentos_3d), cor_3d))
+        segmentos_3d = []
+        nome_3d = None
 
     with open(filepath, "r") as f:
         for linha in f:
@@ -129,6 +140,7 @@ def carregar_obj(filepath):
             token = partes[0]
 
             if token in ("o", "g"):
+                _finalizar_objeto_3d()
                 nome_atual = " ".join(partes[1:]) if len(partes) > 1 else f"obj_{len(objetos)}"
                 cor_atual = "#000000"
                 tipo_atual = None
@@ -142,6 +154,9 @@ def carregar_obj(filepath):
             elif token == "usertype":
                 if len(partes) >= 2:
                     tipo_atual = partes[1]
+                    if tipo_atual == "Objeto3D":
+                        nome_3d = nome_atual
+                        cor_3d = cor_atual
 
             elif token == "userfill":
                 if len(partes) >= 2:
@@ -150,62 +165,59 @@ def carregar_obj(filepath):
             elif token == "v":
                 x = float(partes[1])
                 y = float(partes[2])
-                vertices_globais.append((x, y))
+                z = float(partes[3]) if len(partes) > 3 else 0.0
+                vertices_globais.append((x, y, z))
 
             elif token == "p":
                 if nome_atual is None:
                     nome_atual = f"ponto_{len(objetos)}"
                 indices = [int(idx) for idx in partes[1:]]
-                pontos = [vertices_globais[i - 1] for i in indices]
+                pontos = [vertices_globais[i - 1][:2] for i in indices]
                 objetos.append(Ponto(nome_atual, pontos, cor_atual))
-                nome_atual = None
-                tipo_atual = None
-                fill_atual = False
+                nome_atual = None; tipo_atual = None; fill_atual = False
 
             elif token == "l":
-                if nome_atual is None:
-                    nome_atual = f"linha_{len(objetos)}"
-                indices = [int(idx) for idx in partes[1:]]
-                pontos = [vertices_globais[i - 1] for i in indices]
-                if len(pontos) == 2:
-                    objetos.append(Reta(nome_atual, pontos, cor_atual))
+                if tipo_atual == "Objeto3D":
+                    indices = [int(idx) for idx in partes[1:]]
+                    pts = [vertices_globais[i - 1] for i in indices]
+                    if len(pts) >= 2:
+                        segmentos_3d.append((Ponto3D(*pts[0]), Ponto3D(*pts[1])))
                 else:
-                    objetos.append(Wireframe(nome_atual, pontos, cor_atual, preenchido=fill_atual))
-                nome_atual = None
-                tipo_atual = None
-                fill_atual = False
+                    if nome_atual is None:
+                        nome_atual = f"linha_{len(objetos)}"
+                    indices = [int(idx) for idx in partes[1:]]
+                    pontos = [vertices_globais[i - 1][:2] for i in indices]
+                    if len(pontos) == 2:
+                        objetos.append(Reta(nome_atual, pontos, cor_atual))
+                    else:
+                        objetos.append(Wireframe(nome_atual, pontos, cor_atual, preenchido=fill_atual))
+                    nome_atual = None; tipo_atual = None; fill_atual = False
 
             elif token == "f":
                 if nome_atual is None:
                     nome_atual = f"wireframe_{len(objetos)}"
                 indices = []
                 for idx_str in partes[1:]:
-                    idx = int(idx_str.split("/")[0])
-                    indices.append(idx)
-                pontos = [vertices_globais[i - 1] for i in indices]
+                    indices.append(int(idx_str.split("/")[0]))
+                pontos = [vertices_globais[i - 1][:2] for i in indices]
                 objetos.append(Wireframe(nome_atual, pontos, cor_atual, preenchido=fill_atual))
-                nome_atual = None
-                tipo_atual = None
-                fill_atual = False
+                nome_atual = None; tipo_atual = None; fill_atual = False
 
             elif token == "curva":
                 if nome_atual is None:
                     nome_atual = f"curva_{len(objetos)}"
                 indices = [int(idx) for idx in partes[1:]]
-                pontos = [vertices_globais[i - 1] for i in indices]
+                pontos = [vertices_globais[i - 1][:2] for i in indices]
                 objetos.append(Curva2D(nome_atual, pontos, cor_atual))
-                nome_atual = None
-                tipo_atual = None
-                fill_atual = False
+                nome_atual = None; tipo_atual = None; fill_atual = False
 
             elif token == "bspline":
                 if nome_atual is None:
                     nome_atual = f"bspline_{len(objetos)}"
                 indices = [int(idx) for idx in partes[1:]]
-                pontos = [vertices_globais[i - 1] for i in indices]
+                pontos = [vertices_globais[i - 1][:2] for i in indices]
                 objetos.append(BSpline2D(nome_atual, pontos, cor_atual))
-                nome_atual = None
-                tipo_atual = None
-                fill_atual = False
+                nome_atual = None; tipo_atual = None; fill_atual = False
 
+    _finalizar_objeto_3d()
     return objetos

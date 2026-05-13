@@ -12,12 +12,13 @@ from src.core.clipping import (
 from src.core.bezier import gerar_pontos_curva
 
 class Canvas(QWidget):
-    def __init__(self, display_file, window, viewport):
+    def __init__(self, display_file, window, viewport, window3d):
         super().__init__()
         self.display_file = display_file
         self.window = window
         self.viewport = viewport
-        self.algoritmo_clip_reta = "CS"  
+        self.window3d = window3d
+        self.algoritmo_clip_reta = "CS"
         vp_width = self.viewport.xmax - self.viewport.xmin
         vp_height = self.viewport.ymax - self.viewport.ymin
         # Calcula a proporção da viewport
@@ -85,6 +86,21 @@ class Canvas(QWidget):
         for obj in self.display_file.objetos:
             pen = QPen(QColor(obj.cor), 3)
             painter.setPen(pen)
+
+            if obj.tipo == "Objeto3D":
+                fn_clip = (clip_reta_cohen_sutherland
+                           if self.algoritmo_clip_reta == "CS"
+                           else clip_reta_liang_barsky)
+                for p1, p2 in obj.segmentos:
+                    scn1 = self.window3d.generate_scn_3d((p1.x, p1.y, p1.z))
+                    scn2 = self.window3d.generate_scn_3d((p2.x, p2.y, p2.z))
+                    resultado = fn_clip(scn1, scn2)
+                    if resultado:
+                        vp1 = self.viewport.viewport_transform_scn(resultado[0])
+                        vp2 = self.viewport.viewport_transform_scn(resultado[1])
+                        painter.drawLine(int(vp1[0]), int(vp1[1]),
+                                         int(vp2[0]), int(vp2[1]))
+                continue
 
             # Converte para SCN (clipping acontece aqui, em [-1,1]x[-1,1])
             coords_scn = [self.window.generate_scn(pt) for pt in obj.pontos]
@@ -164,3 +180,4 @@ class Canvas(QWidget):
                         anterior_vp = (x, y)
                     else:
                         anterior_vp = None
+

@@ -1,14 +1,36 @@
 # src/ui/main_window.py
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                             QPushButton, QListWidget, QLineEdit, QLabel, QMessageBox,
+                             QPushButton, QListWidget, QListWidgetItem, QLineEdit, QLabel, QMessageBox,
                              QGridLayout, QGroupBox, QDialog, QTabWidget,
                              QMenu, QButtonGroup, QRadioButton, QComboBox, QFileDialog,
                              QCheckBox)
 from PyQt6.QtCore import Qt
 from src.ui.canvas import Canvas
-from src.core.geometry import Ponto, Reta, Wireframe, Curva2D, BSpline2D
+from src.core.geometry import Ponto, Reta, Wireframe, Curva2D, BSpline2D, Ponto3D, Objeto3D
+from src.core.transform3d import Transform3D as Transform3D3D
+from src.core.window3d import Window3D
+from src.utils.utils import STEP
 from src.core.transform import Transform
 from src.core.obj_io import salvar_obj, carregar_obj
+
+
+def _parse_segmentos_3d(texto: str):
+    """Converte '(x1,y1,z1)-(x2,y2,z2), ...' em lista de (Ponto3D, Ponto3D).
+
+    Levanta ValueError se o formato estiver errado.
+    """
+    import re
+    segmentos = []
+    padrao = r'\(([^)]+)\)\s*-\s*\(([^)]+)\)'
+    for m in re.finditer(padrao, texto):
+        coords_a = tuple(float(v.strip()) for v in m.group(1).split(','))
+        coords_b = tuple(float(v.strip()) for v in m.group(2).split(','))
+        if len(coords_a) != 3 or len(coords_b) != 3:
+            raise ValueError(f"Coordenada deve ter 3 valores: {m.group(0)!r}")
+        segmentos.append((Ponto3D(*coords_a), Ponto3D(*coords_b)))
+    if not segmentos:
+        raise ValueError("Nenhum segmento encontrado. Use o formato: (x1,y1,z1)-(x2,y2,z2), ...")
+    return segmentos
 
 
 # --- CLASSE DO DIÁLOGO (POP-UP) ---
@@ -306,17 +328,235 @@ class JanelaObjetoDialog(QDialog):
         return self.lista_transformacoes
 
 
+class JanelaObjeto3DDialog(QDialog):
+    """Diálogo para criar/editar Objeto3D (modelo de arame 3D)."""
+
+    def __init__(self, parent=None, nome="", segmentos_str="", cor_atual="#000000", modo_edicao=False):
+        super().__init__(parent)
+        self.setWindowTitle("Propriedades Objeto 3D" if modo_edicao else "Novo Objeto 3D")
+        self.setFixedSize(520, 500)
+        self.modo_edicao = modo_edicao
+        self.apagar_solicitado = False
+        self.lista_transformacoes = []
+
+        layout_principal = QVBoxLayout(self)
+        self.abas = QTabWidget()
+        layout_principal.addWidget(self.abas)
+
+        # --- Aba Geometria ---
+        aba_geo = QWidget()
+        layout_geo = QVBoxLayout(aba_geo)
+
+        layout_geo.addWidget(QLabel("Nome:"))
+        self.input_nome = QLineEdit(nome)
+        if modo_edicao:
+            self.input_nome.setReadOnly(True)
+            self.input_nome.setStyleSheet("background-color: #E0E0E0;")
+        layout_geo.addWidget(self.input_nome)
+
+        layout_geo.addWidget(QLabel("Segmentos  [(x1,y1,z1)-(x2,y2,z2), ...]:"))
+        self.input_segs = QLineEdit(segmentos_str)
+        self.input_segs.setPlaceholderText("(0,0,0)-(1,0,0), (1,0,0)-(1,1,0)")
+        layout_geo.addWidget(self.input_segs)
+
+        layout_geo.addWidget(QLabel("Cor do Traço:"))
+        layout_cores = QHBoxLayout()
+        self.grupo_cores = QButtonGroup(self)
+        self.lista_cores = ["#000000", "#FF0000", "#00FF00", "#0000FF",
+                            "#FFFF00", "#FF00FF", "#00FFFF", "#FFA500"]
+        for i, cor in enumerate(self.lista_cores):
+            btn = QPushButton()
+            btn.setFixedSize(20, 20)
+            btn.setStyleSheet(f"""
+                QPushButton {{ background-color: {cor}; border: 2px outset #FFFFFF;
+                               border-bottom-color: #808080; border-right-color: #808080; }}
+                QPushButton:checked {{ border: 2px inset #000000;
+                                       border-bottom-color: #FFFFFF; border-right-color: #FFFFFF; }}
+            """)
+            btn.setCheckable(True)
+            self.grupo_cores.addButton(btn, i)
+            layout_cores.addWidget(btn)
+            if cor == cor_atual:
+                btn.setChecked(True)
+        if self.grupo_cores.checkedId() == -1:
+            self.grupo_cores.button(0).setChecked(True)
+        layout_cores.addStretch()
+        layout_geo.addLayout(layout_cores)
+        layout_geo.addStretch()
+        self.abas.addTab(aba_geo, "Geometria")
+
+        # --- Aba Transformações 3D ---
+        aba_transf = QWidget()
+        layout_transf = QVBoxLayout(aba_transf)
+
+        linha_tipo = QHBoxLayout()
+        linha_tipo.addWidget(QLabel("Tipo:"))
+        self.combo_tipo = QComboBox()
+        self.combo_tipo.addItems(["Translação", "Escalonamento", "Rotação"])
+        self.combo_tipo.currentIndexChanged.connect(self._atualizar_campos)
+        linha_tipo.addWidget(self.combo_tipo)
+        layout_transf.addLayout(linha_tipo)
+
+        self.grupo_campos = QGroupBox("Parâmetros")
+        layout_campos = QVBoxLayout(self.grupo_campos)
+
+        # Translação
+        self.widget_trl = QWidget()
+        lt = QHBoxLayout(self.widget_trl); lt.setContentsMargins(0,0,0,0)
+        for lbl, attr in [("Dx:", "input_dx"), ("Dy:", "input_dy"), ("Dz:", "input_dz")]:
+            lt.addWidget(QLabel(lbl))
+            inp = QLineEdit("0"); inp.setFixedWidth(55)
+            setattr(self, attr, inp); lt.addWidget(inp)
+        lt.addStretch()
+
+        # Escalonamento
+        self.widget_esc = QWidget()
+        le = QHBoxLayout(self.widget_esc); le.setContentsMargins(0,0,0,0)
+        for lbl, attr in [("Sx:", "input_sx"), ("Sy:", "input_sy"), ("Sz:", "input_sz")]:
+            le.addWidget(QLabel(lbl))
+            inp = QLineEdit("1"); inp.setFixedWidth(55)
+            setattr(self, attr, inp); le.addWidget(inp)
+        le.addStretch()
+
+        # Rotação
+        self.widget_rot = QWidget()
+        lr = QVBoxLayout(self.widget_rot); lr.setContentsMargins(0,0,0,0)
+        linha_ang = QHBoxLayout()
+        linha_ang.addWidget(QLabel("Ângulo (°):"))
+        self.input_angulo = QLineEdit("0"); self.input_angulo.setFixedWidth(60)
+        linha_ang.addWidget(self.input_angulo); linha_ang.addStretch()
+        lr.addLayout(linha_ang)
+        self.radio_eixo_x = QRadioButton("Eixo X (centro obj)")
+        self.radio_eixo_y = QRadioButton("Eixo Y (centro obj)")
+        self.radio_eixo_z = QRadioButton("Eixo Z (centro obj)")
+        self.radio_arb   = QRadioButton("Eixo arbitrário")
+        self.radio_eixo_z.setChecked(True)
+        for r in [self.radio_eixo_x, self.radio_eixo_y, self.radio_eixo_z, self.radio_arb]:
+            lr.addWidget(r)
+        self.radio_arb.toggled.connect(self._toggle_arb)
+
+        self.widget_arb = QWidget()
+        la = QHBoxLayout(self.widget_arb); la.setContentsMargins(0,0,0,0)
+        la.addWidget(QLabel("Eixo (ax,ay,az):"))
+        self.input_eixo = QLineEdit("0,0,1"); self.input_eixo.setFixedWidth(80)
+        la.addWidget(self.input_eixo)
+        la.addWidget(QLabel("  Ponto (px,py,pz):"))
+        self.input_ponto_eixo = QLineEdit("0,0,0"); self.input_ponto_eixo.setFixedWidth(80)
+        la.addWidget(self.input_ponto_eixo); la.addStretch()
+        self.widget_arb.setEnabled(False)
+        lr.addWidget(self.widget_arb)
+
+        layout_campos.addWidget(self.widget_trl)
+        layout_campos.addWidget(self.widget_esc)
+        layout_campos.addWidget(self.widget_rot)
+        layout_transf.addWidget(self.grupo_campos)
+
+        btn_add = QPushButton("Adicionar à lista ▼")
+        btn_add.clicked.connect(self._adicionar_transformacao)
+        layout_transf.addWidget(btn_add)
+
+        layout_transf.addWidget(QLabel("Transformações a aplicar:"))
+        self.lista_transf_widget = QListWidget()
+        self.lista_transf_widget.setMaximumHeight(100)
+        layout_transf.addWidget(self.lista_transf_widget)
+
+        btn_rem = QPushButton("Remover selecionada")
+        btn_rem.clicked.connect(self._remover_transformacao)
+        layout_transf.addWidget(btn_rem)
+
+        self.abas.addTab(aba_transf, "Transformações 3D")
+        if not modo_edicao:
+            self.abas.setTabEnabled(1, False)
+
+        self._atualizar_campos(0)
+
+        # Botões OK/Cancelar
+        layout_btns = QHBoxLayout()
+        if modo_edicao:
+            btn_apagar = QPushButton("Apagar")
+            btn_apagar.clicked.connect(self._acao_apagar)
+            layout_btns.addWidget(btn_apagar)
+        layout_btns.addStretch()
+        btn_ok = QPushButton("OK"); btn_ok.clicked.connect(self.accept)
+        btn_cancel = QPushButton("Cancelar"); btn_cancel.clicked.connect(self.reject)
+        layout_btns.addWidget(btn_ok); layout_btns.addWidget(btn_cancel)
+        layout_principal.addLayout(layout_btns)
+
+    def _toggle_arb(self, checked):
+        self.widget_arb.setEnabled(checked)
+
+    def _atualizar_campos(self, index):
+        self.widget_trl.setVisible(index == 0)
+        self.widget_esc.setVisible(index == 1)
+        self.widget_rot.setVisible(index == 2)
+
+    def _adicionar_transformacao(self):
+        try:
+            idx = self.combo_tipo.currentIndex()
+            if idx == 0:
+                dx = float(self.input_dx.text())
+                dy = float(self.input_dy.text())
+                dz = float(self.input_dz.text())
+                self.lista_transformacoes.append(("translacao", dx, dy, dz))
+                self.lista_transf_widget.addItem(f"Translação ({dx},{dy},{dz})")
+            elif idx == 1:
+                sx = float(self.input_sx.text())
+                sy = float(self.input_sy.text())
+                sz = float(self.input_sz.text())
+                self.lista_transformacoes.append(("escalonamento", sx, sy, sz))
+                self.lista_transf_widget.addItem(f"Escalonamento ({sx},{sy},{sz})")
+            elif idx == 2:
+                ang = float(self.input_angulo.text())
+                if self.radio_eixo_x.isChecked():
+                    self.lista_transformacoes.append(("rotacao_x", ang))
+                    self.lista_transf_widget.addItem(f"Rotação X {ang}°")
+                elif self.radio_eixo_y.isChecked():
+                    self.lista_transformacoes.append(("rotacao_y", ang))
+                    self.lista_transf_widget.addItem(f"Rotação Y {ang}°")
+                elif self.radio_eixo_z.isChecked():
+                    self.lista_transformacoes.append(("rotacao_z", ang))
+                    self.lista_transf_widget.addItem(f"Rotação Z {ang}°")
+                elif self.radio_arb.isChecked():
+                    parts_e = [float(v) for v in self.input_eixo.text().split(",")]
+                    parts_p = [float(v) for v in self.input_ponto_eixo.text().split(",")]
+                    eixo = tuple(parts_e)
+                    ponto = tuple(parts_p)
+                    self.lista_transformacoes.append(("rotacao_arbitraria", ang, eixo, ponto))
+                    self.lista_transf_widget.addItem(f"Rot. Arb. {ang}° eixo{eixo} pt{ponto}")
+        except ValueError:
+            QMessageBox.warning(self, "Erro", "Valores numéricos inválidos.")
+
+    def _remover_transformacao(self):
+        row = self.lista_transf_widget.currentRow()
+        if row >= 0:
+            self.lista_transf_widget.takeItem(row)
+            self.lista_transformacoes.pop(row)
+
+    def _acao_apagar(self):
+        self.apagar_solicitado = True
+        self.accept()
+
+    def obter_dados(self):
+        id_cor = self.grupo_cores.checkedId()
+        cor = self.lista_cores[id_cor] if id_cor != -1 else "#000000"
+        return self.input_nome.text(), self.input_segs.text(), cor
+
+    def obter_transformacoes(self):
+        return self.lista_transformacoes
+
+
 # --- CLASSE DA JANELA PRINCIPAL ---
 
 class MainWindow(QMainWindow):
-    def __init__(self, display_file, window_obj, viewport):
+    def __init__(self, display_file, window_obj, viewport, window3d):
         super().__init__()
         self.display_file = display_file
         self.window_obj = window_obj
         self.viewport = viewport
+        self.window3d = window3d
         self.transform = Transform()
 
-        self.setWindowTitle("Sistema Grafico Interativo - V1.6")
+        self.setWindowTitle("Sistema Grafico Interativo - V1.7")
         self.setGeometry(100, 100, 1050, 650)
 
         self.aplicar_tema()
@@ -402,37 +642,54 @@ class MainWindow(QMainWindow):
         botoes_lista_layout.addWidget(btn_editar)
         layout_objetos.addLayout(botoes_lista_layout)
 
-        # Botões de importar/exportar OBJ
-        botoes_obj_layout = QHBoxLayout()
+        painel_layout.addWidget(grupo_objetos)
+
+        # --- Grupo: Objetos 3D ---
+        grupo_3d = QGroupBox("Objetos 3D")
+        layout_3d = QVBoxLayout(grupo_3d)
+
+        self.list_widget_3d = QListWidget()
+        self.list_widget_3d.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.list_widget_3d.customContextMenuRequested.connect(self._menu_contexto_3d)
+        self.list_widget_3d.itemDoubleClicked.connect(self._editar_objeto_3d)
+        layout_3d.addWidget(self.list_widget_3d)
+
+        botoes_3d = QHBoxLayout()
+        btn_novo_3d = QPushButton("Novo 3D...")
+        btn_novo_3d.clicked.connect(self._novo_objeto_3d)
+        btn_editar_3d = QPushButton("Editar 3D...")
+        btn_editar_3d.clicked.connect(self._editar_objeto_3d)
+        botoes_3d.addWidget(btn_novo_3d)
+        botoes_3d.addWidget(btn_editar_3d)
+        layout_3d.addLayout(botoes_3d)
+
+        painel_layout.addWidget(grupo_3d)
+
+        # --- Grupo: Arquivo (2D + 3D) ---
+        grupo_arquivo = QGroupBox("Arquivo (2D + 3D)")
+        botoes_obj_layout = QHBoxLayout(grupo_arquivo)
         btn_importar = QPushButton("Importar .obj")
         btn_importar.clicked.connect(self.importar_obj)
         btn_exportar = QPushButton("Exportar .obj")
         btn_exportar.clicked.connect(self.exportar_obj)
         botoes_obj_layout.addWidget(btn_importar)
         botoes_obj_layout.addWidget(btn_exportar)
-        layout_objetos.addLayout(botoes_obj_layout)
 
-        painel_layout.addWidget(grupo_objetos)
+        painel_layout.addWidget(grupo_arquivo)
 
-        # --- Grupo 2: Navegação e Zoom ---
-        grupo_nav = QGroupBox("Window View")
+        # --- Grupo: Navegação (2D + 3D) ---
+        grupo_nav = QGroupBox("Navegação (2D + 3D)")
         layout_nav = QVBoxLayout(grupo_nav)
 
         nav_grid = QGridLayout()
-        btn_up = QPushButton("Up")
-        btn_down = QPushButton("Down")
-        btn_left = QPushButton("Left")
-        btn_right = QPushButton("Right")
-        btn_zoom_in = QPushButton("Zoom In")
-        btn_zoom_out = QPushButton("Zoom Out")
-
+        btn_up = QPushButton("▲")
+        btn_down = QPushButton("▼")
+        btn_left = QPushButton("◄")
+        btn_right = QPushButton("►")
         btn_up.clicked.connect(self.mover_cima)
         btn_down.clicked.connect(self.mover_baixo)
         btn_left.clicked.connect(self.mover_esquerda)
         btn_right.clicked.connect(self.mover_direita)
-        btn_zoom_in.clicked.connect(self.zoom_in)
-        btn_zoom_out.clicked.connect(self.zoom_out)
-
         nav_grid.addWidget(btn_up, 0, 1)
         nav_grid.addWidget(btn_left, 1, 0)
         nav_grid.addWidget(btn_right, 1, 2)
@@ -440,32 +697,49 @@ class MainWindow(QMainWindow):
         layout_nav.addLayout(nav_grid)
 
         zoom_layout = QHBoxLayout()
+        btn_zoom_in = QPushButton("Zoom In")
+        btn_zoom_out = QPushButton("Zoom Out")
+        btn_zoom_in.clicked.connect(self.zoom_in)
+        btn_zoom_out.clicked.connect(self.zoom_out)
         zoom_layout.addWidget(btn_zoom_in)
         zoom_layout.addWidget(btn_zoom_out)
         layout_nav.addLayout(zoom_layout)
 
-        # --- Rotação da Window ---
-        rot_layout = QHBoxLayout()
-        rot_layout.addWidget(QLabel("Rotação:"))
-        self.input_rot_window = QLineEdit("10")
-        self.input_rot_window.setFixedWidth(50)
-        rot_layout.addWidget(self.input_rot_window)
-        rot_layout.addWidget(QLabel("°"))
+        depth_row = QHBoxLayout()
+        btn_n_pos = QPushButton("Frente (3D)")
+        btn_n_neg = QPushButton("Atrás (3D)")
+        btn_n_pos.clicked.connect(lambda: self._nav3d_move_n(STEP))
+        btn_n_neg.clicked.connect(lambda: self._nav3d_move_n(-STEP))
+        depth_row.addWidget(btn_n_pos)
+        depth_row.addWidget(btn_n_neg)
+        layout_nav.addLayout(depth_row)
 
-        btn_rot_esq = QPushButton("↷")
-        btn_rot_esq.setFixedWidth(30)
-        btn_rot_esq.clicked.connect(self.rotacionar_window_esquerda)
+        rot_layout = QHBoxLayout()
+        rot_layout.addWidget(QLabel("Rot°:"))
+        self.input_rot_window = QLineEdit("10")
+        self.input_rot_window.setFixedWidth(45)
+        rot_layout.addWidget(self.input_rot_window)
+
         btn_rot_dir = QPushButton("↶")
-        btn_rot_dir.setFixedWidth(30)
+        btn_rot_dir.setFixedWidth(28)
         btn_rot_dir.clicked.connect(self.rotacionar_window_direita)
+        btn_rot_esq = QPushButton("↷")
+        btn_rot_esq.setFixedWidth(28)
+        btn_rot_esq.clicked.connect(self.rotacionar_window_esquerda)
         rot_layout.addWidget(btn_rot_dir)
         rot_layout.addWidget(btn_rot_esq)
-        rot_layout.addStretch()
 
+        for label, fn in [("U", self.window3d.rotate_u),
+                           ("V", self.window3d.rotate_v),
+                           ("N", self.window3d.rotate_n)]:
+            btn = QPushButton(label)
+            btn.setFixedWidth(28)
+            btn.clicked.connect(lambda checked=False, f=fn: self._nav3d_rotate(f))
+            rot_layout.addWidget(btn)
+        rot_layout.addStretch()
         layout_nav.addLayout(rot_layout)
 
-        # Label que mostra o ângulo atual
-        self.label_angulo = QLabel("Ângulo atual: 0.0°")
+        self.label_angulo = QLabel("Ângulo 2D: 0.0°")
         layout_nav.addWidget(self.label_angulo)
 
         painel_layout.addWidget(grupo_nav)
@@ -493,7 +767,7 @@ class MainWindow(QMainWindow):
         layout_canvas = QVBoxLayout(grupo_viewport)
         layout_canvas.setContentsMargins(10, 15, 10, 10)
 
-        self.canvas = Canvas(self.display_file, self.window_obj, self.viewport)
+        self.canvas = Canvas(self.display_file, self.window_obj, self.viewport, self.window3d)
 
         self.canvas.setObjectName("AreaCanvas")
         self.canvas.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -679,26 +953,32 @@ class MainWindow(QMainWindow):
     # --- Funções de Navegação ---
     def mover_cima(self):
         self.window_obj.up()
+        self.window3d.move_v(STEP)
         self.canvas.update()
 
     def mover_baixo(self):
         self.window_obj.down()
+        self.window3d.move_v(-STEP)
         self.canvas.update()
 
     def mover_esquerda(self):
         self.window_obj.left()
+        self.window3d.move_u(-STEP)
         self.canvas.update()
 
     def mover_direita(self):
         self.window_obj.right()
+        self.window3d.move_u(STEP)
         self.canvas.update()
 
     def zoom_in(self):
         self.window_obj.zoom_in()
+        self.window3d.zoom_in()
         self.canvas.update()
 
     def zoom_out(self):
         self.window_obj.zoom_out()
+        self.window3d.zoom_out()
         self.canvas.update()
 
     # --- Rotação da Window ---
@@ -739,10 +1019,15 @@ class MainWindow(QMainWindow):
                     contador += 1
 
                 self.display_file.adicionar_objeto(obj)
-                texto = f"{obj.nome} [{obj.tipo}]"
-                self.list_widget.addItem(texto)
-                novo_item = self.list_widget.item(self.list_widget.count() - 1)
-                novo_item.setData(Qt.ItemDataRole.UserRole, obj.nome)
+                if obj.tipo == "Objeto3D":
+                    item = QListWidgetItem(f"{obj.nome} [Objeto3D]")
+                    item.setData(Qt.ItemDataRole.UserRole, obj.nome)
+                    self.list_widget_3d.addItem(item)
+                else:
+                    texto = f"{obj.nome} [{obj.tipo}]"
+                    self.list_widget.addItem(texto)
+                    novo_item = self.list_widget.item(self.list_widget.count() - 1)
+                    novo_item.setData(Qt.ItemDataRole.UserRole, obj.nome)
 
             self.canvas.update()
             QMessageBox.information(self, "Sucesso", f"{len(objetos)} objeto(s) importado(s).")
@@ -768,3 +1053,106 @@ class MainWindow(QMainWindow):
         else:
             self.canvas.algoritmo_clip_reta = "LB"
         self.canvas.update()
+
+    # --- Ações Objetos 3D ---
+
+    def _novo_objeto_3d(self):
+        dialogo = JanelaObjeto3DDialog(self)
+        if dialogo.exec():
+            nome, segs_str, cor = dialogo.obter_dados()
+            if not nome or not segs_str:
+                QMessageBox.warning(self, "Erro", "Preencha nome e segmentos.")
+                return
+            try:
+                segs = _parse_segmentos_3d(segs_str)
+                obj = Objeto3D(nome, segs, cor)
+                self.display_file.adicionar_objeto(obj)
+                item = QListWidgetItem(f"{nome} [Objeto3D]")
+                item.setData(Qt.ItemDataRole.UserRole, nome)
+                self.list_widget_3d.addItem(item)
+                self.canvas.update()
+            except Exception as e:
+                QMessageBox.warning(self, "Erro", f"Segmentos inválidos:\n{e}")
+
+    def _editar_objeto_3d(self):
+        item = self.list_widget_3d.currentItem()
+        if not item:
+            QMessageBox.information(self, "Aviso", "Selecione um objeto 3D.")
+            return
+        nome = item.data(Qt.ItemDataRole.UserRole)
+        obj = next((o for o in self.display_file.obter_todos()
+                    if o.nome == nome and o.tipo == "Objeto3D"), None)
+        if not obj:
+            return
+        segs_str = ", ".join(
+            f"({p1.x},{p1.y},{p1.z})-({p2.x},{p2.y},{p2.z})"
+            for p1, p2 in obj.segmentos)
+        dialogo = JanelaObjeto3DDialog(self, nome=nome, segmentos_str=segs_str,
+                                       cor_atual=obj.cor, modo_edicao=True)
+        if dialogo.exec():
+            if dialogo.apagar_solicitado:
+                self.display_file.remover_objeto(nome)
+                row = self.list_widget_3d.row(item)
+                self.list_widget_3d.takeItem(row)
+                self.canvas.update()
+                return
+            _, novas_segs_str, nova_cor = dialogo.obter_dados()
+            transformacoes = dialogo.obter_transformacoes()
+            if transformacoes:
+                obj.segmentos = Transform3D3D.aplicar_lista_transformacoes(
+                    obj.segmentos, transformacoes)
+            elif novas_segs_str != segs_str:
+                try:
+                    obj.segmentos = _parse_segmentos_3d(novas_segs_str)
+                except Exception as e:
+                    QMessageBox.warning(self, "Erro", f"Segmentos inválidos:\n{e}")
+            obj.cor = nova_cor
+            self.canvas.update()
+
+    def _menu_contexto_3d(self, posicao):
+        item = self.list_widget_3d.itemAt(posicao)
+        if item:
+            menu = QMenu()
+            menu.setStyleSheet(
+                "QMenu { background-color: #D4D0C8; border: 1px solid black; } "
+                "QMenu::item:selected { background-color: #000080; color: white; }")
+            acao_editar = menu.addAction("Propriedades...")
+            acao_apagar = menu.addAction("Apagar")
+            acao = menu.exec(self.list_widget_3d.mapToGlobal(posicao))
+            if acao == acao_editar:
+                self._editar_objeto_3d()
+            elif acao == acao_apagar:
+                nome = item.data(Qt.ItemDataRole.UserRole)
+                self.display_file.remover_objeto(nome)
+                self.list_widget_3d.takeItem(self.list_widget_3d.row(item))
+                self.canvas.update()
+
+    # --- Navegação 3D ---
+
+    def _nav3d_move_u(self, step):
+        self.window3d.move_u(step)
+        self.canvas.update()
+
+    def _nav3d_move_v(self, step):
+        self.window3d.move_v(step)
+        self.canvas.update()
+
+    def _nav3d_move_n(self, step):
+        self.window3d.move_n(step)
+        self.canvas.update()
+
+    def _nav3d_zoom_in(self):
+        self.window3d.zoom_in()
+        self.canvas.update()
+
+    def _nav3d_zoom_out(self):
+        self.window3d.zoom_out()
+        self.canvas.update()
+
+    def _nav3d_rotate(self, fn):
+        try:
+            ang = float(self.input_rot_window.text())
+            fn(ang)
+            self.canvas.update()
+        except ValueError:
+            QMessageBox.warning(self, "Erro", "Ângulo inválido.")

@@ -4,18 +4,18 @@ from PyQt6.QtWidgets import QApplication
 from src.core.display_file import DisplayFile
 from src.core.window import Window
 from src.core.viewport import Viewport
+from src.core.window3d import Window3D
 from src.ui.main_window import MainWindow
 
 def main():
     app = QApplication(sys.argv)
 
-    # Cria as estruturas principais do sistema gráfico
     display_file = DisplayFile()
     window = Window()
     viewport = Viewport()
+    window3d = Window3D()
 
-    # Inicializa e exibe a interface gráfica
-    tela = MainWindow(display_file, window, viewport)
+    tela = MainWindow(display_file, window, viewport, window3d)
     tela.show()
 
     sys.exit(app.exec())

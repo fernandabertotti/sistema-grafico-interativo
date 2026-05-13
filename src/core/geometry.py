@@ -32,3 +32,19 @@ class BSpline2D(ObjetoGrafico):
     """B-Spline cúbica uniforme por Forward Differences. `pontos` são os pontos de controle (>= 4)."""
     def __init__(self, nome, pontos, cor="#000000"):
         super().__init__(nome, pontos, "BSpline2D", cor)
+
+
+class Ponto3D:
+    def __init__(self, x: float, y: float, z: float):
+        self.x = float(x)
+        self.y = float(y)
+        self.z = float(z)
+
+
+# Não herda ObjetoGrafico: base usa pontos 2D; Canvas identifica por obj.tipo (string).
+class Objeto3D:
+    def __init__(self, nome: str, segmentos: List[Tuple["Ponto3D", "Ponto3D"]], cor: str = "#000000"):
+        self.nome = nome
+        self.segmentos = segmentos  # List[Tuple[Ponto3D, Ponto3D]]
+        self.tipo = "Objeto3D"
+        self.cor = cor
