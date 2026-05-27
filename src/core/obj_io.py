@@ -195,13 +195,26 @@ def carregar_obj(filepath):
 
             elif token == "f":
                 if nome_atual is None:
-                    nome_atual = f"wireframe_{len(objetos)}"
+                    nome_atual = f"obj_{len(objetos)}"
                 indices = []
                 for idx_str in partes[1:]:
                     indices.append(int(idx_str.split("/")[0]))
-                pontos = [vertices_globais[i - 1][:2] for i in indices]
-                objetos.append(Wireframe(nome_atual, pontos, cor_atual, preenchido=fill_atual))
-                nome_atual = None; tipo_atual = None; fill_atual = False
+                verts = [vertices_globais[i - 1] for i in indices]
+
+                # Face com vértices 3D (z != 0) → acumula arestas em Objeto3D
+                is_3d_face = any(abs(v[2]) > 1e-10 for v in verts)
+                if is_3d_face:
+                    if nome_3d is None:
+                        nome_3d = nome_atual
+                        cor_3d = cor_atual
+                    n_f = len(verts)
+                    for j in range(n_f):
+                        segmentos_3d.append((Ponto3D(*verts[j]),
+                                             Ponto3D(*verts[(j + 1) % n_f])))
+                else:
+                    pontos = [v[:2] for v in verts]
+                    objetos.append(Wireframe(nome_atual, pontos, cor_atual, preenchido=fill_atual))
+                    nome_atual = None; tipo_atual = None; fill_atual = False
 
             elif token == "curva":
                 if nome_atual is None:

@@ -19,6 +19,8 @@ class Canvas(QWidget):
         self.viewport = viewport
         self.window3d = window3d
         self.algoritmo_clip_reta = "CS"
+        self.modo_perspectiva = False
+        self.distancia_focal = 500.0
         vp_width = self.viewport.xmax - self.viewport.xmin
         vp_height = self.viewport.ymax - self.viewport.ymin
         # Calcula a proporção da viewport
@@ -92,8 +94,14 @@ class Canvas(QWidget):
                            if self.algoritmo_clip_reta == "CS"
                            else clip_reta_liang_barsky)
                 for p1, p2 in obj.segmentos:
-                    scn1 = self.window3d.generate_scn_3d((p1.x, p1.y, p1.z))
-                    scn2 = self.window3d.generate_scn_3d((p2.x, p2.y, p2.z))
+                    if self.modo_perspectiva:
+                        scn1 = self.window3d.generate_scn_3d_perspective(
+                            (p1.x, p1.y, p1.z), self.distancia_focal)
+                        scn2 = self.window3d.generate_scn_3d_perspective(
+                            (p2.x, p2.y, p2.z), self.distancia_focal)
+                    else:
+                        scn1 = self.window3d.generate_scn_3d((p1.x, p1.y, p1.z))
+                        scn2 = self.window3d.generate_scn_3d((p2.x, p2.y, p2.z))
                     resultado = fn_clip(scn1, scn2)
                     if resultado:
                         vp1 = self.viewport.viewport_transform_scn(resultado[0])

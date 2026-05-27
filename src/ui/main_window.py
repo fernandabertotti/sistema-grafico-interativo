@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QListWidget, QListWidgetItem, QLineEdit, QLabel, QMessageBox,
                              QGridLayout, QGroupBox, QDialog, QTabWidget,
                              QMenu, QButtonGroup, QRadioButton, QComboBox, QFileDialog,
-                             QCheckBox)
+                             QCheckBox, QSlider)
 from PyQt6.QtCore import Qt
 from src.ui.canvas import Canvas
 from src.core.geometry import Ponto, Reta, Wireframe, Curva2D, BSpline2D, Ponto3D, Objeto3D
@@ -556,11 +556,12 @@ class MainWindow(QMainWindow):
         self.window3d = window3d
         self.transform = Transform()
 
-        self.setWindowTitle("Sistema Grafico Interativo - V1.7")
-        self.setGeometry(100, 100, 1050, 650)
+        self.setWindowTitle("Sistema Grafico Interativo - V1.8")
+        self.setGeometry(100, 100, 1100, 700)
 
         self.aplicar_tema()
         self.setup_ui()
+        self._carregar_cena_inicial()
 
     def aplicar_tema(self):
         estilo = """
@@ -759,6 +760,35 @@ class MainWindow(QMainWindow):
         clipping_layout.addWidget(self.radio_cs)
         clipping_layout.addWidget(self.radio_lb)
         painel_layout.addWidget(grupo_clip)
+
+        # --- Grupo: Perspectiva ---
+        grupo_persp = QGroupBox("Projeção 3D")
+        layout_persp = QVBoxLayout(grupo_persp)
+
+        self.check_perspectiva = QCheckBox("Modo Perspectiva")
+        self.check_perspectiva.setChecked(False)
+        self.check_perspectiva.toggled.connect(self._toggle_perspectiva)
+        layout_persp.addWidget(self.check_perspectiva)
+
+        linha_d = QHBoxLayout()
+        linha_d.addWidget(QLabel("d:"))
+        self._slider_focal = QSlider(Qt.Orientation.Horizontal)
+        self._slider_focal.setMinimum(50)
+        self._slider_focal.setMaximum(5000)
+        self._slider_focal.setValue(500)
+        self._slider_focal.setTickInterval(500)
+        self._slider_focal.valueChanged.connect(self._slider_focal_changed)
+        linha_d.addWidget(self._slider_focal)
+        self._label_d_valor = QLabel("500")
+        self._label_d_valor.setFixedWidth(38)
+        linha_d.addWidget(self._label_d_valor)
+        layout_persp.addLayout(linha_d)
+
+        self._label_modo_persp = QLabel("Modo: Normal  |  [ diminui  ] aumenta d")
+        self._label_modo_persp.setWordWrap(True)
+        layout_persp.addWidget(self._label_modo_persp)
+
+        painel_layout.addWidget(grupo_persp)
         painel_layout.addStretch()
 
         # DIREITA: Canvas (Viewport)
@@ -1156,3 +1186,74 @@ class MainWindow(QMainWindow):
             self.canvas.update()
         except ValueError:
             QMessageBox.warning(self, "Erro", "Ângulo inválido.")
+
+    # --- Perspectiva ---
+
+    def _toggle_perspectiva(self, checked):
+        self.canvas.modo_perspectiva = checked
+        self.canvas.update()
+
+    def _slider_focal_changed(self, valor):
+        self.canvas.distancia_focal = float(valor)
+        self._label_d_valor.setText(str(valor))
+        self._atualizar_label_modo()
+        self.canvas.update()
+
+    def _atualizar_label_modo(self):
+        d = self.canvas.distancia_focal
+        if d < 300:
+            modo = "Grande Angular"
+        elif d <= 1000:
+            modo = "Normal"
+        else:
+            modo = "Teleobjetiva"
+        self._label_modo_persp.setText(f"Modo: {modo}  |  [ diminui  ] aumenta d")
+
+    def _ajustar_focal(self, delta):
+        novo_d = max(50, min(5000, int(self.canvas.distancia_focal) + delta))
+        self.canvas.distancia_focal = float(novo_d)
+        self._slider_focal.setValue(novo_d)
+        self._label_d_valor.setText(str(novo_d))
+        self._atualizar_label_modo()
+        self.canvas.update()
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        if key == Qt.Key.Key_BracketLeft:
+            self._ajustar_focal(-50)
+        elif key == Qt.Key.Key_BracketRight:
+            self._ajustar_focal(50)
+        else:
+            super().keyPressEvent(event)
+
+    # --- Cena Inicial ---
+
+    def _carregar_cena_inicial(self):
+        """Adiciona cubo e pirâmide ao display file no startup."""
+        # Cubo centrado na origem (size 100)
+        cv = [
+            (-50, -50, -50), (50, -50, -50), (50,  50, -50), (-50,  50, -50),
+            (-50, -50,  50), (50, -50,  50), (50,  50,  50), (-50,  50,  50),
+        ]
+        ce = [(0,1),(1,2),(2,3),(3,0), (4,5),(5,6),(6,7),(7,4),
+              (0,4),(1,5),(2,6),(3,7)]
+        cube_segs = [(Ponto3D(*cv[i]), Ponto3D(*cv[j])) for i, j in ce]
+        cubo = Objeto3D("Cubo", cube_segs, "#0000FF")
+
+        # Pirâmide quadrangular deslocada (centro em x=200)
+        pv = [
+            (200,  80,   0),
+            (150, -50, -60), (250, -50, -60),
+            (250, -50,  60), (150, -50,  60),
+        ]
+        pe = [(0,1),(0,2),(0,3),(0,4), (1,2),(2,3),(3,4),(4,1)]
+        pyr_segs = [(Ponto3D(*pv[i]), Ponto3D(*pv[j])) for i, j in pe]
+        piramide = Objeto3D("Piramide", pyr_segs, "#FF0000")
+
+        for obj in (cubo, piramide):
+            self.display_file.adicionar_objeto(obj)
+            item = QListWidgetItem(f"{obj.nome} [Objeto3D]")
+            item.setData(Qt.ItemDataRole.UserRole, obj.nome)
+            self.list_widget_3d.addItem(item)
+
+        self.canvas.update()
