@@ -9,7 +9,6 @@ from src.ui.canvas import Canvas
 from src.core.geometry import Ponto, Reta, Wireframe, Curva2D, BSpline2D, Ponto3D, Objeto3D
 from src.core.transform3d import Transform3D as Transform3D3D
 from src.core.window3d import Window3D
-from src.utils.utils import STEP
 from src.core.transform import Transform
 from src.core.obj_io import salvar_obj, carregar_obj
 
@@ -678,70 +677,76 @@ class MainWindow(QMainWindow):
 
         painel_layout.addWidget(grupo_arquivo)
 
-        # --- Grupo: Navegação (2D + 3D) ---
-        grupo_nav = QGroupBox("Navegação (2D + 3D)")
+        # --- Grupo: Navegação ---
+        grupo_nav = QGroupBox("Navegação")
         layout_nav = QVBoxLayout(grupo_nav)
 
-        nav_grid = QGridLayout()
-        btn_up = QPushButton("▲")
-        btn_down = QPushButton("▼")
-        btn_left = QPushButton("◄")
-        btn_right = QPushButton("►")
-        btn_up.clicked.connect(self.mover_cima)
-        btn_down.clicked.connect(self.mover_baixo)
-        btn_left.clicked.connect(self.mover_esquerda)
-        btn_right.clicked.connect(self.mover_direita)
-        nav_grid.addWidget(btn_up, 0, 1)
-        nav_grid.addWidget(btn_left, 1, 0)
-        nav_grid.addWidget(btn_right, 1, 2)
-        nav_grid.addWidget(btn_down, 2, 1)
-        layout_nav.addLayout(nav_grid)
+        linha_passo = QHBoxLayout()
+        linha_passo.addWidget(QLabel("Passo:"))
+        self.input_passo = QLineEdit("10")
+        self.input_passo.setFixedWidth(50)
+        linha_passo.addWidget(self.input_passo)
+        linha_passo.addStretch()
+        layout_nav.addLayout(linha_passo)
 
-        zoom_layout = QHBoxLayout()
-        btn_zoom_in = QPushButton("Zoom In")
-        btn_zoom_out = QPushButton("Zoom Out")
-        btn_zoom_in.clicked.connect(self.zoom_in)
-        btn_zoom_out.clicked.connect(self.zoom_out)
-        zoom_layout.addWidget(btn_zoom_in)
-        zoom_layout.addWidget(btn_zoom_out)
-        layout_nav.addLayout(zoom_layout)
+        # Translação
+        layout_nav.addWidget(QLabel("Translação"))
+        grid_trl = QGridLayout()
+        btn_y_pos = QPushButton("▲ Y")
+        btn_x_neg = QPushButton("◄ X")
+        btn_x_pos = QPushButton("X ►")
+        btn_y_neg = QPushButton("▼ Y")
+        btn_y_pos.clicked.connect(self._mover_y_pos)
+        btn_x_neg.clicked.connect(self._mover_x_neg)
+        btn_x_pos.clicked.connect(self._mover_x_pos)
+        btn_y_neg.clicked.connect(self._mover_y_neg)
+        grid_trl.addWidget(btn_y_pos, 0, 1)
+        grid_trl.addWidget(btn_x_neg, 1, 0)
+        grid_trl.addWidget(btn_x_pos, 1, 2)
+        grid_trl.addWidget(btn_y_neg, 2, 1)
+        layout_nav.addLayout(grid_trl)
 
-        depth_row = QHBoxLayout()
-        btn_n_pos = QPushButton("Frente (3D)")
-        btn_n_neg = QPushButton("Atrás (3D)")
-        btn_n_pos.clicked.connect(lambda: self._nav3d_move_n(STEP))
-        btn_n_neg.clicked.connect(lambda: self._nav3d_move_n(-STEP))
-        depth_row.addWidget(btn_n_pos)
-        depth_row.addWidget(btn_n_neg)
-        layout_nav.addLayout(depth_row)
+        linha_z = QHBoxLayout()
+        btn_z_pos = QPushButton("Z ↑ Aprox.")
+        btn_z_neg = QPushButton("Z ↓ Afastar")
+        btn_z_pos.clicked.connect(self._mover_z_pos)
+        btn_z_neg.clicked.connect(self._mover_z_neg)
+        linha_z.addWidget(btn_z_pos)
+        linha_z.addWidget(btn_z_neg)
+        layout_nav.addLayout(linha_z)
 
-        rot_layout = QHBoxLayout()
-        rot_layout.addWidget(QLabel("Rot°:"))
-        self.input_rot_window = QLineEdit("10")
-        self.input_rot_window.setFixedWidth(45)
-        rot_layout.addWidget(self.input_rot_window)
+        # Rotação
+        layout_nav.addWidget(QLabel("Rotação"))
+        rot_grid = QGridLayout()
+        btn_rx_neg = QPushButton("Rx−"); btn_rx_pos = QPushButton("Rx+")
+        btn_ry_neg = QPushButton("Ry−"); btn_ry_pos = QPushButton("Ry+")
+        btn_rz_neg = QPushButton("Rz−"); btn_rz_pos = QPushButton("Rz+")
+        btn_rx_neg.clicked.connect(lambda: self._rot_u(-1))
+        btn_rx_pos.clicked.connect(lambda: self._rot_u(1))
+        btn_ry_neg.clicked.connect(lambda: self._rot_v(-1))
+        btn_ry_pos.clicked.connect(lambda: self._rot_v(1))
+        btn_rz_neg.clicked.connect(lambda: self._rot_n(-1))
+        btn_rz_pos.clicked.connect(lambda: self._rot_n(1))
+        rot_grid.addWidget(btn_rx_neg, 0, 1)
+        rot_grid.addWidget(btn_rx_pos, 0, 2)
+        rot_grid.addWidget(QLabel("Eixo X"), 0, 0)
+        rot_grid.addWidget(btn_ry_neg, 1, 1)
+        rot_grid.addWidget(btn_ry_pos, 1, 2)
+        rot_grid.addWidget(QLabel("Eixo Y"), 1, 0)
+        rot_grid.addWidget(btn_rz_neg, 2, 1)
+        rot_grid.addWidget(btn_rz_pos, 2, 2)
+        rot_grid.addWidget(QLabel("Eixo Z"), 2, 0)
+        layout_nav.addLayout(rot_grid)
 
-        btn_rot_dir = QPushButton("↶")
-        btn_rot_dir.setFixedWidth(28)
-        btn_rot_dir.clicked.connect(self.rotacionar_window_direita)
-        btn_rot_esq = QPushButton("↷")
-        btn_rot_esq.setFixedWidth(28)
-        btn_rot_esq.clicked.connect(self.rotacionar_window_esquerda)
-        rot_layout.addWidget(btn_rot_dir)
-        rot_layout.addWidget(btn_rot_esq)
-
-        for label, fn in [("U", self.window3d.rotate_u),
-                           ("V", self.window3d.rotate_v),
-                           ("N", self.window3d.rotate_n)]:
-            btn = QPushButton(label)
-            btn.setFixedWidth(28)
-            btn.clicked.connect(lambda checked=False, f=fn: self._nav3d_rotate(f))
-            rot_layout.addWidget(btn)
-        rot_layout.addStretch()
-        layout_nav.addLayout(rot_layout)
-
-        self.label_angulo = QLabel("Ângulo 2D: 0.0°")
-        layout_nav.addWidget(self.label_angulo)
+        # Zoom (escala)
+        zoom_row = QHBoxLayout()
+        btn_zoom_in = QPushButton("Zoom +")
+        btn_zoom_out = QPushButton("Zoom −")
+        btn_zoom_in.clicked.connect(self._zoom_in)
+        btn_zoom_out.clicked.connect(self._zoom_out)
+        zoom_row.addWidget(btn_zoom_in)
+        zoom_row.addWidget(btn_zoom_out)
+        layout_nav.addLayout(zoom_row)
 
         painel_layout.addWidget(grupo_nav)
         painel_layout.addStretch()
@@ -980,55 +985,53 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, "Erro", f"Formato de coordenadas inválido.\nUse: (x1, y1), (x2, y2), ...")
 
-    # --- Funções de Navegação ---
-    def mover_cima(self):
-        self.window_obj.up()
-        self.window3d.move_v(STEP)
-        self.canvas.update()
+    # --- Navegação Unificada ---
 
-    def mover_baixo(self):
-        self.window_obj.down()
-        self.window3d.move_v(-STEP)
-        self.canvas.update()
-
-    def mover_esquerda(self):
-        self.window_obj.left()
-        self.window3d.move_u(-STEP)
-        self.canvas.update()
-
-    def mover_direita(self):
-        self.window_obj.right()
-        self.window3d.move_u(STEP)
-        self.canvas.update()
-
-    def zoom_in(self):
-        self.window_obj.zoom_in()
-        self.window3d.zoom_in()
-        self.canvas.update()
-
-    def zoom_out(self):
-        self.window_obj.zoom_out()
-        self.window3d.zoom_out()
-        self.canvas.update()
-
-    # --- Rotação da Window ---
-    def rotacionar_window_esquerda(self):
+    def _passo(self):
         try:
-            angulo = float(self.input_rot_window.text())
-            self.window_obj.rotate(angulo)
-            self.label_angulo.setText(f"Ângulo atual: {self.window_obj.angulo:.1f}°")
-            self.canvas.update()
+            return float(self.input_passo.text())
         except ValueError:
-            QMessageBox.warning(self, "Erro", "Ângulo inválido.")
+            return 10.0
 
-    def rotacionar_window_direita(self):
-        try:
-            angulo = float(self.input_rot_window.text())
-            self.window_obj.rotate(-angulo)
-            self.label_angulo.setText(f"Ângulo atual: {self.window_obj.angulo:.1f}°")
-            self.canvas.update()
-        except ValueError:
-            QMessageBox.warning(self, "Erro", "Ângulo inválido.")
+    def _mover_x_pos(self):
+        s = self._passo()
+        self.window_obj.right(s); self.window3d.move_u(s); self.canvas.update()
+
+    def _mover_x_neg(self):
+        s = self._passo()
+        self.window_obj.left(s); self.window3d.move_u(-s); self.canvas.update()
+
+    def _mover_y_pos(self):
+        s = self._passo()
+        self.window_obj.up(s); self.window3d.move_v(s); self.canvas.update()
+
+    def _mover_y_neg(self):
+        s = self._passo()
+        self.window_obj.down(s); self.window3d.move_v(-s); self.canvas.update()
+
+    def _mover_z_pos(self):
+        self.window3d.move_n(self._passo()); self.canvas.update()
+
+    def _mover_z_neg(self):
+        self.window3d.move_n(-self._passo()); self.canvas.update()
+
+    def _rot_u(self, sinal):
+        self.window3d.rotate_u(sinal * self._passo()); self.canvas.update()
+
+    def _rot_v(self, sinal):
+        self.window3d.rotate_v(sinal * self._passo()); self.canvas.update()
+
+    def _rot_n(self, sinal):
+        ang = sinal * self._passo()
+        self.window3d.rotate_n(ang)
+        self.window_obj.rotate(ang)
+        self.canvas.update()
+
+    def _zoom_in(self):
+        self.window_obj.zoom_in(); self.window3d.zoom_in(); self.canvas.update()
+
+    def _zoom_out(self):
+        self.window_obj.zoom_out(); self.window3d.zoom_out(); self.canvas.update()
 
     # --- Importar/Exportar OBJ ---
     def importar_obj(self):
@@ -1157,35 +1160,6 @@ class MainWindow(QMainWindow):
                 self.list_widget_3d.takeItem(self.list_widget_3d.row(item))
                 self.canvas.update()
 
-    # --- Navegação 3D ---
-
-    def _nav3d_move_u(self, step):
-        self.window3d.move_u(step)
-        self.canvas.update()
-
-    def _nav3d_move_v(self, step):
-        self.window3d.move_v(step)
-        self.canvas.update()
-
-    def _nav3d_move_n(self, step):
-        self.window3d.move_n(step)
-        self.canvas.update()
-
-    def _nav3d_zoom_in(self):
-        self.window3d.zoom_in()
-        self.canvas.update()
-
-    def _nav3d_zoom_out(self):
-        self.window3d.zoom_out()
-        self.canvas.update()
-
-    def _nav3d_rotate(self, fn):
-        try:
-            ang = float(self.input_rot_window.text())
-            fn(ang)
-            self.canvas.update()
-        except ValueError:
-            QMessageBox.warning(self, "Erro", "Ângulo inválido.")
 
     # --- Perspectiva ---
 
@@ -1219,10 +1193,25 @@ class MainWindow(QMainWindow):
 
     def keyPressEvent(self, event):
         key = event.key()
-        if key == Qt.Key.Key_BracketLeft:
-            self._ajustar_focal(-50)
-        elif key == Qt.Key.Key_BracketRight:
-            self._ajustar_focal(50)
+        atalhos = {
+            Qt.Key.Key_W: self._mover_y_pos,
+            Qt.Key.Key_S: self._mover_y_neg,
+            Qt.Key.Key_A: self._mover_x_neg,
+            Qt.Key.Key_D: self._mover_x_pos,
+            Qt.Key.Key_Q: self._mover_z_neg,
+            Qt.Key.Key_E: self._mover_z_pos,
+            Qt.Key.Key_I: lambda: self._rot_u(1),
+            Qt.Key.Key_K: lambda: self._rot_u(-1),
+            Qt.Key.Key_J: lambda: self._rot_v(-1),
+            Qt.Key.Key_L: lambda: self._rot_v(1),
+            Qt.Key.Key_U: lambda: self._rot_n(1),
+            Qt.Key.Key_O: lambda: self._rot_n(-1),
+            Qt.Key.Key_BracketLeft:  lambda: self._ajustar_focal(-50),
+            Qt.Key.Key_BracketRight: lambda: self._ajustar_focal(50),
+        }
+        fn = atalhos.get(key)
+        if fn:
+            fn()
         else:
             super().keyPressEvent(event)
 
