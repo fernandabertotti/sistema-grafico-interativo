@@ -48,3 +48,13 @@ class Objeto3D:
         self.segmentos = segmentos  # List[Tuple[Ponto3D, Ponto3D]]
         self.tipo = "Objeto3D"
         self.cor = cor
+
+
+class SuperficieBSpline3D:
+    """Superficie bicubica B-Spline uniforme definida por matriz de pontos 3D."""
+    def __init__(self, nome: str, matriz_controle: List[List[Ponto3D]], cor: str = "#000000", passos: int = 10):
+        self.nome = nome
+        self.matriz_controle = matriz_controle
+        self.tipo = "SuperficieBSpline3D"
+        self.cor = cor
+        self.passos = int(passos)

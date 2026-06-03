@@ -3,6 +3,7 @@ from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QPolygonF
 from PyQt6.QtCore import QPointF
 from src.utils.utils import VP_MARGIN, BEZIER_STEPS
 from src.core.bspline import gerar_pontos_bspline
+from src.core.bspline_surface import gerar_segmentos_superficie_bspline
 from src.core.clipping import (
     clip_ponto,
     clip_reta_cohen_sutherland,   # ou liang_barsky — escolha uma e use radio button na UI
@@ -110,6 +111,29 @@ class Canvas(QWidget):
                                          int(vp2[0]), int(vp2[1]))
                 continue
 
+            if obj.tipo == "SuperficieBSpline3D":
+                fn_clip = (clip_reta_cohen_sutherland
+                           if self.algoritmo_clip_reta == "CS"
+                           else clip_reta_liang_barsky)
+                segmentos = gerar_segmentos_superficie_bspline(
+                    obj.matriz_controle, getattr(obj, "passos", 10))
+                for p1, p2 in segmentos:
+                    if self.modo_perspectiva:
+                        scn1 = self.window3d.generate_scn_3d_perspective(
+                            (p1.x, p1.y, p1.z), self.distancia_focal)
+                        scn2 = self.window3d.generate_scn_3d_perspective(
+                            (p2.x, p2.y, p2.z), self.distancia_focal)
+                    else:
+                        scn1 = self.window3d.generate_scn_3d((p1.x, p1.y, p1.z))
+                        scn2 = self.window3d.generate_scn_3d((p2.x, p2.y, p2.z))
+                    resultado = fn_clip(scn1, scn2)
+                    if resultado:
+                        vp1 = self.viewport.viewport_transform_scn(resultado[0])
+                        vp2 = self.viewport.viewport_transform_scn(resultado[1])
+                        painter.drawLine(int(vp1[0]), int(vp1[1]),
+                                         int(vp2[0]), int(vp2[1]))
+                continue
+
             # Converte para SCN (clipping acontece aqui, em [-1,1]x[-1,1])
             coords_scn = [self.window.generate_scn(pt) for pt in obj.pontos]
 
@@ -188,4 +212,3 @@ class Canvas(QWidget):
                         anterior_vp = (x, y)
                     else:
                         anterior_vp = None
-

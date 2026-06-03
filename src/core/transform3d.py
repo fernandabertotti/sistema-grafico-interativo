@@ -122,6 +122,19 @@ class Transform3D:
         return resultado
 
     @staticmethod
+    def apply_matrix_pontos(matrix: np.ndarray, pontos) -> list:
+        """Aplica matriz 4x4 a uma lista de Ponto3D."""
+        resultado = []
+        for p in pontos:
+            v = np.array([p.x, p.y, p.z, 1.0]) @ matrix
+            resultado.append(Ponto3D(v[0], v[1], v[2]))
+        return resultado
+
+    @staticmethod
+    def apply_matrix_matriz_pontos(matrix: np.ndarray, matriz) -> list:
+        return [Transform3D.apply_matrix_pontos(matrix, linha) for linha in matriz]
+
+    @staticmethod
     def centro_objeto(segmentos) -> Tuple[float, float, float]:
         """Centróide de todos os pontos dos segmentos."""
         pontos = [p for seg in segmentos for p in seg]
@@ -132,6 +145,18 @@ class Transform3D:
         cy = sum(p.y for p in pontos) / n
         cz = sum(p.z for p in pontos) / n
         return (cx, cy, cz)
+
+    @staticmethod
+    def centro_matriz_pontos(matriz) -> Tuple[float, float, float]:
+        pontos = [p for linha in matriz for p in linha]
+        n = len(pontos)
+        if n == 0:
+            return (0.0, 0.0, 0.0)
+        return (
+            sum(p.x for p in pontos) / n,
+            sum(p.y for p in pontos) / n,
+            sum(p.z for p in pontos) / n,
+        )
 
     @staticmethod
     def translacao(segmentos, dx: float, dy: float, dz: float) -> list:
@@ -189,4 +214,36 @@ class Transform3D:
             elif tipo == "rotacao_arbitraria":
                 _, angulo, eixo, ponto = t
                 resultado = Transform3D.rotacao_eixo_arbitrario(resultado, angulo, eixo, ponto)
+        return resultado
+
+    @staticmethod
+    def aplicar_lista_transformacoes_matriz(matriz_pontos, lista) -> list:
+        resultado = [list(linha) for linha in matriz_pontos]
+        for t in lista:
+            tipo = t[0]
+            if tipo == "translacao":
+                _, dx, dy, dz = t
+                M = Transform3D.translation_matrix(dx, dy, dz)
+            elif tipo == "escalonamento":
+                _, sx, sy, sz = t
+                cx, cy, cz = Transform3D.centro_matriz_pontos(resultado)
+                M = (Transform3D.translation_matrix(-cx, -cy, -cz)
+                     @ Transform3D.scaling_matrix(sx, sy, sz)
+                     @ Transform3D.translation_matrix(cx, cy, cz))
+            elif tipo in ("rotacao_x", "rotacao_y", "rotacao_z"):
+                _, angulo = t
+                eixo = tipo[-1]
+                cx, cy, cz = Transform3D.centro_matriz_pontos(resultado)
+                fn = {'x': Transform3D.rotation_x_matrix,
+                      'y': Transform3D.rotation_y_matrix,
+                      'z': Transform3D.rotation_z_matrix}[eixo]
+                M = (Transform3D.translation_matrix(-cx, -cy, -cz)
+                     @ fn(angulo)
+                     @ Transform3D.translation_matrix(cx, cy, cz))
+            elif tipo == "rotacao_arbitraria":
+                _, angulo, eixo, ponto = t
+                M = Transform3D.rotation_arbitrary_axis(angulo, eixo, ponto)
+            else:
+                continue
+            resultado = Transform3D.apply_matrix_matriz_pontos(M, resultado)
         return resultado

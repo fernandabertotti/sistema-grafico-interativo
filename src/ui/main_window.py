@@ -3,14 +3,18 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QListWidget, QListWidgetItem, QLineEdit, QLabel, QMessageBox,
                              QGridLayout, QGroupBox, QDialog, QTabWidget,
                              QMenu, QButtonGroup, QRadioButton, QComboBox, QFileDialog,
-                             QCheckBox, QSlider)
+                             QCheckBox, QSlider, QTextEdit)
 from PyQt6.QtCore import Qt
 from src.ui.canvas import Canvas
-from src.core.geometry import Ponto, Reta, Wireframe, Curva2D, BSpline2D, Ponto3D, Objeto3D
+from src.core.geometry import (
+    Ponto, Reta, Wireframe, Curva2D, BSpline2D, Ponto3D, Objeto3D,
+    SuperficieBSpline3D,
+)
 from src.core.transform3d import Transform3D as Transform3D3D
 from src.core.window3d import Window3D
 from src.core.transform import Transform
 from src.core.obj_io import salvar_obj, carregar_obj
+from src.core.bspline_surface import validar_matriz_controle
 
 
 def _parse_segmentos_3d(texto: str):
@@ -30,6 +34,31 @@ def _parse_segmentos_3d(texto: str):
     if not segmentos:
         raise ValueError("Nenhum segmento encontrado. Use o formato: (x1,y1,z1)-(x2,y2,z2), ...")
     return segmentos
+
+
+def _parse_matriz_pontos_3d(texto: str):
+    import ast
+    matriz = []
+    for linha_txt in texto.strip().split(";"):
+        linha_txt = linha_txt.strip()
+        if not linha_txt:
+            continue
+        valores = ast.literal_eval(f"[{linha_txt}]")
+        linha = []
+        for ponto in valores:
+            if len(ponto) != 3:
+                raise ValueError(f"Ponto deve ter 3 valores: {ponto!r}")
+            linha.append(Ponto3D(float(ponto[0]), float(ponto[1]), float(ponto[2])))
+        matriz.append(linha)
+    validar_matriz_controle(matriz)
+    return matriz
+
+
+def _format_matriz_pontos_3d(matriz):
+    linhas = []
+    for linha in matriz:
+        linhas.append(", ".join(f"({p.x:g},{p.y:g},{p.z:g})" for p in linha))
+    return ";\n".join(linhas)
 
 
 # --- CLASSE DO DIÁLOGO (POP-UP) ---
@@ -544,6 +573,217 @@ class JanelaObjeto3DDialog(QDialog):
         return self.lista_transformacoes
 
 
+class JanelaSuperficieBSplineDialog(QDialog):
+    """Dialogo para criar/editar superficies bicubicas B-Spline."""
+
+    def __init__(self, parent=None, nome="", matriz_str="", cor_atual="#000000",
+                 passos=10, modo_edicao=False):
+        super().__init__(parent)
+        self.setWindowTitle("Propriedades Superficie B-Spline" if modo_edicao else "Nova Superficie B-Spline")
+        self.setFixedSize(620, 620)
+        self.modo_edicao = modo_edicao
+        self.apagar_solicitado = False
+        self.lista_transformacoes = []
+
+        layout_principal = QVBoxLayout(self)
+        self.abas = QTabWidget()
+        layout_principal.addWidget(self.abas)
+
+        aba_geo = QWidget()
+        layout_geo = QVBoxLayout(aba_geo)
+        layout_geo.addWidget(QLabel("Nome:"))
+        self.input_nome = QLineEdit(nome)
+        if modo_edicao:
+            self.input_nome.setReadOnly(True)
+            self.input_nome.setStyleSheet("background-color: #E0E0E0;")
+        layout_geo.addWidget(self.input_nome)
+
+        layout_geo.addWidget(QLabel("Matriz de controle 4x4 ate 20x20. Separe linhas com ';':"))
+        self.input_matriz = QTextEdit()
+        self.input_matriz.setPlainText(matriz_str)
+        self.input_matriz.setPlaceholderText("(x11,y11,z11), (x12,y12,z12), ...;\n(x21,y21,z21), ...")
+        layout_geo.addWidget(self.input_matriz)
+
+        linha_passos = QHBoxLayout()
+        linha_passos.addWidget(QLabel("Passos por patch:"))
+        self.input_passos = QLineEdit(str(passos))
+        self.input_passos.setFixedWidth(60)
+        linha_passos.addWidget(self.input_passos)
+        linha_passos.addStretch()
+        layout_geo.addLayout(linha_passos)
+
+        layout_geo.addWidget(QLabel("Cor do Traço:"))
+        layout_cores = QHBoxLayout()
+        self.grupo_cores = QButtonGroup(self)
+        self.lista_cores = ["#000000", "#FF0000", "#00FF00", "#0000FF",
+                            "#FFFF00", "#FF00FF", "#00FFFF", "#FFA500"]
+        for i, cor in enumerate(self.lista_cores):
+            btn = QPushButton()
+            btn.setFixedSize(20, 20)
+            btn.setStyleSheet(f"""
+                QPushButton {{ background-color: {cor}; border: 2px outset #FFFFFF;
+                               border-bottom-color: #808080; border-right-color: #808080; }}
+                QPushButton:checked {{ border: 2px inset #000000;
+                                       border-bottom-color: #FFFFFF; border-right-color: #FFFFFF; }}
+            """)
+            btn.setCheckable(True)
+            self.grupo_cores.addButton(btn, i)
+            layout_cores.addWidget(btn)
+            if cor == cor_atual:
+                btn.setChecked(True)
+        if self.grupo_cores.checkedId() == -1:
+            self.grupo_cores.button(0).setChecked(True)
+        layout_cores.addStretch()
+        layout_geo.addLayout(layout_cores)
+        self.abas.addTab(aba_geo, "Geometria")
+
+        aba_transf = QWidget()
+        layout_transf = QVBoxLayout(aba_transf)
+        linha_tipo = QHBoxLayout()
+        linha_tipo.addWidget(QLabel("Tipo:"))
+        self.combo_tipo = QComboBox()
+        self.combo_tipo.addItems(["Translação", "Escalonamento", "Rotação"])
+        self.combo_tipo.currentIndexChanged.connect(self._atualizar_campos)
+        linha_tipo.addWidget(self.combo_tipo)
+        layout_transf.addLayout(linha_tipo)
+
+        self.grupo_campos = QGroupBox("Parâmetros")
+        layout_campos = QVBoxLayout(self.grupo_campos)
+        self.widget_trl = QWidget()
+        lt = QHBoxLayout(self.widget_trl); lt.setContentsMargins(0, 0, 0, 0)
+        for lbl, attr in [("Dx:", "input_dx"), ("Dy:", "input_dy"), ("Dz:", "input_dz")]:
+            lt.addWidget(QLabel(lbl))
+            inp = QLineEdit("0"); inp.setFixedWidth(55)
+            setattr(self, attr, inp); lt.addWidget(inp)
+        lt.addStretch()
+
+        self.widget_esc = QWidget()
+        le = QHBoxLayout(self.widget_esc); le.setContentsMargins(0, 0, 0, 0)
+        for lbl, attr in [("Sx:", "input_sx"), ("Sy:", "input_sy"), ("Sz:", "input_sz")]:
+            le.addWidget(QLabel(lbl))
+            inp = QLineEdit("1"); inp.setFixedWidth(55)
+            setattr(self, attr, inp); le.addWidget(inp)
+        le.addStretch()
+
+        self.widget_rot = QWidget()
+        lr = QVBoxLayout(self.widget_rot); lr.setContentsMargins(0, 0, 0, 0)
+        linha_ang = QHBoxLayout()
+        linha_ang.addWidget(QLabel("Ângulo (°):"))
+        self.input_angulo = QLineEdit("0"); self.input_angulo.setFixedWidth(60)
+        linha_ang.addWidget(self.input_angulo); linha_ang.addStretch()
+        lr.addLayout(linha_ang)
+        self.radio_eixo_x = QRadioButton("Eixo X (centro obj)")
+        self.radio_eixo_y = QRadioButton("Eixo Y (centro obj)")
+        self.radio_eixo_z = QRadioButton("Eixo Z (centro obj)")
+        self.radio_arb = QRadioButton("Eixo arbitrário")
+        self.radio_eixo_z.setChecked(True)
+        for radio in [self.radio_eixo_x, self.radio_eixo_y, self.radio_eixo_z, self.radio_arb]:
+            lr.addWidget(radio)
+        self.radio_arb.toggled.connect(self._toggle_arb)
+        self.widget_arb = QWidget()
+        la = QHBoxLayout(self.widget_arb); la.setContentsMargins(0, 0, 0, 0)
+        la.addWidget(QLabel("Eixo (ax,ay,az):"))
+        self.input_eixo = QLineEdit("0,0,1"); self.input_eixo.setFixedWidth(80)
+        la.addWidget(self.input_eixo)
+        la.addWidget(QLabel("Ponto (px,py,pz):"))
+        self.input_ponto_eixo = QLineEdit("0,0,0"); self.input_ponto_eixo.setFixedWidth(80)
+        la.addWidget(self.input_ponto_eixo); la.addStretch()
+        self.widget_arb.setEnabled(False)
+        lr.addWidget(self.widget_arb)
+
+        layout_campos.addWidget(self.widget_trl)
+        layout_campos.addWidget(self.widget_esc)
+        layout_campos.addWidget(self.widget_rot)
+        layout_transf.addWidget(self.grupo_campos)
+
+        btn_add = QPushButton("Adicionar à lista ▼")
+        btn_add.clicked.connect(self._adicionar_transformacao)
+        layout_transf.addWidget(btn_add)
+        layout_transf.addWidget(QLabel("Transformações a aplicar:"))
+        self.lista_transf_widget = QListWidget()
+        self.lista_transf_widget.setMaximumHeight(100)
+        layout_transf.addWidget(self.lista_transf_widget)
+        btn_rem = QPushButton("Remover selecionada")
+        btn_rem.clicked.connect(self._remover_transformacao)
+        layout_transf.addWidget(btn_rem)
+        self.abas.addTab(aba_transf, "Transformações 3D")
+        if not modo_edicao:
+            self.abas.setTabEnabled(1, False)
+        self._atualizar_campos(0)
+
+        layout_btns = QHBoxLayout()
+        if modo_edicao:
+            btn_apagar = QPushButton("Apagar")
+            btn_apagar.clicked.connect(self._acao_apagar)
+            layout_btns.addWidget(btn_apagar)
+        layout_btns.addStretch()
+        btn_ok = QPushButton("OK"); btn_ok.clicked.connect(self.accept)
+        btn_cancel = QPushButton("Cancelar"); btn_cancel.clicked.connect(self.reject)
+        layout_btns.addWidget(btn_ok); layout_btns.addWidget(btn_cancel)
+        layout_principal.addLayout(layout_btns)
+
+    def _toggle_arb(self, checked):
+        self.widget_arb.setEnabled(checked)
+
+    def _atualizar_campos(self, index):
+        self.widget_trl.setVisible(index == 0)
+        self.widget_esc.setVisible(index == 1)
+        self.widget_rot.setVisible(index == 2)
+
+    def _adicionar_transformacao(self):
+        try:
+            idx = self.combo_tipo.currentIndex()
+            if idx == 0:
+                dx = float(self.input_dx.text())
+                dy = float(self.input_dy.text())
+                dz = float(self.input_dz.text())
+                self.lista_transformacoes.append(("translacao", dx, dy, dz))
+                self.lista_transf_widget.addItem(f"Translação ({dx},{dy},{dz})")
+            elif idx == 1:
+                sx = float(self.input_sx.text())
+                sy = float(self.input_sy.text())
+                sz = float(self.input_sz.text())
+                self.lista_transformacoes.append(("escalonamento", sx, sy, sz))
+                self.lista_transf_widget.addItem(f"Escalonamento ({sx},{sy},{sz})")
+            elif idx == 2:
+                ang = float(self.input_angulo.text())
+                if self.radio_eixo_x.isChecked():
+                    self.lista_transformacoes.append(("rotacao_x", ang))
+                    self.lista_transf_widget.addItem(f"Rotação X {ang}°")
+                elif self.radio_eixo_y.isChecked():
+                    self.lista_transformacoes.append(("rotacao_y", ang))
+                    self.lista_transf_widget.addItem(f"Rotação Y {ang}°")
+                elif self.radio_eixo_z.isChecked():
+                    self.lista_transformacoes.append(("rotacao_z", ang))
+                    self.lista_transf_widget.addItem(f"Rotação Z {ang}°")
+                elif self.radio_arb.isChecked():
+                    eixo = tuple(float(v) for v in self.input_eixo.text().split(","))
+                    ponto = tuple(float(v) for v in self.input_ponto_eixo.text().split(","))
+                    self.lista_transformacoes.append(("rotacao_arbitraria", ang, eixo, ponto))
+                    self.lista_transf_widget.addItem(f"Rot. Arb. {ang}° eixo{eixo} pt{ponto}")
+        except ValueError:
+            QMessageBox.warning(self, "Erro", "Valores numéricos inválidos.")
+
+    def _remover_transformacao(self):
+        row = self.lista_transf_widget.currentRow()
+        if row >= 0:
+            self.lista_transf_widget.takeItem(row)
+            self.lista_transformacoes.pop(row)
+
+    def _acao_apagar(self):
+        self.apagar_solicitado = True
+        self.accept()
+
+    def obter_dados(self):
+        id_cor = self.grupo_cores.checkedId()
+        cor = self.lista_cores[id_cor] if id_cor != -1 else "#000000"
+        passos = int(self.input_passos.text())
+        return self.input_nome.text(), self.input_matriz.toPlainText(), cor, passos
+
+    def obter_transformacoes(self):
+        return self.lista_transformacoes
+
+
 # --- CLASSE DA JANELA PRINCIPAL ---
 
 class MainWindow(QMainWindow):
@@ -662,6 +902,12 @@ class MainWindow(QMainWindow):
         botoes_3d.addWidget(btn_novo_3d)
         botoes_3d.addWidget(btn_editar_3d)
         layout_3d.addLayout(botoes_3d)
+
+        botoes_superficie = QHBoxLayout()
+        btn_nova_superficie = QPushButton("Nova Sup. B-Spline...")
+        btn_nova_superficie.clicked.connect(self._nova_superficie_bspline)
+        botoes_superficie.addWidget(btn_nova_superficie)
+        layout_3d.addLayout(botoes_superficie)
 
         painel_layout.addWidget(grupo_3d)
 
@@ -1052,8 +1298,8 @@ class MainWindow(QMainWindow):
                     contador += 1
 
                 self.display_file.adicionar_objeto(obj)
-                if obj.tipo == "Objeto3D":
-                    item = QListWidgetItem(f"{obj.nome} [Objeto3D]")
+                if obj.tipo in ("Objeto3D", "SuperficieBSpline3D"):
+                    item = QListWidgetItem(f"{obj.nome} [{obj.tipo}]")
                     item.setData(Qt.ItemDataRole.UserRole, obj.nome)
                     self.list_widget_3d.addItem(item)
                 else:
@@ -1107,12 +1353,38 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 QMessageBox.warning(self, "Erro", f"Segmentos inválidos:\n{e}")
 
+    def _nova_superficie_bspline(self):
+        dialogo = JanelaSuperficieBSplineDialog(self)
+        if dialogo.exec():
+            try:
+                nome, matriz_str, cor, passos = dialogo.obter_dados()
+                if not nome or not matriz_str:
+                    QMessageBox.warning(self, "Erro", "Preencha nome e matriz de controle.")
+                    return
+                matriz = _parse_matriz_pontos_3d(matriz_str)
+                if passos <= 0:
+                    raise ValueError("Passos deve ser maior que zero.")
+                obj = SuperficieBSpline3D(nome, matriz, cor, passos)
+                self.display_file.adicionar_objeto(obj)
+                item = QListWidgetItem(f"{nome} [SuperficieBSpline3D]")
+                item.setData(Qt.ItemDataRole.UserRole, nome)
+                self.list_widget_3d.addItem(item)
+                self.canvas.update()
+            except Exception as e:
+                QMessageBox.warning(self, "Erro", f"Matriz inválida:\n{e}")
+
     def _editar_objeto_3d(self):
         item = self.list_widget_3d.currentItem()
         if not item:
             QMessageBox.information(self, "Aviso", "Selecione um objeto 3D.")
             return
         nome = item.data(Qt.ItemDataRole.UserRole)
+        sup = next((o for o in self.display_file.obter_todos()
+                    if o.nome == nome and o.tipo == "SuperficieBSpline3D"), None)
+        if sup:
+            self._editar_superficie_bspline(item, sup)
+            return
+
         obj = next((o for o in self.display_file.obter_todos()
                     if o.nome == nome and o.tipo == "Objeto3D"), None)
         if not obj:
@@ -1141,6 +1413,34 @@ class MainWindow(QMainWindow):
                     QMessageBox.warning(self, "Erro", f"Segmentos inválidos:\n{e}")
             obj.cor = nova_cor
             self.canvas.update()
+
+    def _editar_superficie_bspline(self, item, obj):
+        matriz_str = _format_matriz_pontos_3d(obj.matriz_controle)
+        dialogo = JanelaSuperficieBSplineDialog(
+            self, nome=obj.nome, matriz_str=matriz_str, cor_atual=obj.cor,
+            passos=getattr(obj, "passos", 10), modo_edicao=True)
+        if dialogo.exec():
+            if dialogo.apagar_solicitado:
+                self.display_file.remover_objeto(obj.nome)
+                row = self.list_widget_3d.row(item)
+                self.list_widget_3d.takeItem(row)
+                self.canvas.update()
+                return
+            try:
+                _, nova_matriz_str, nova_cor, novos_passos = dialogo.obter_dados()
+                transformacoes = dialogo.obter_transformacoes()
+                if transformacoes:
+                    obj.matriz_controle = Transform3D3D.aplicar_lista_transformacoes_matriz(
+                        obj.matriz_controle, transformacoes)
+                elif nova_matriz_str != matriz_str:
+                    obj.matriz_controle = _parse_matriz_pontos_3d(nova_matriz_str)
+                if novos_passos <= 0:
+                    raise ValueError("Passos deve ser maior que zero.")
+                obj.cor = nova_cor
+                obj.passos = novos_passos
+                self.canvas.update()
+            except Exception as e:
+                QMessageBox.warning(self, "Erro", f"Matriz inválida:\n{e}")
 
     def _menu_contexto_3d(self, posicao):
         item = self.list_widget_3d.itemAt(posicao)

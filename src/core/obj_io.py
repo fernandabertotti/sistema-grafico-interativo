@@ -16,7 +16,10 @@ Objetos 2D escrevem z=0.0; Objeto3D escreve z real e usa 'usertype Objeto3D'.
 Para Objeto3D, cada segmento gera dois vértices consecutivos + uma linha 'l i j'.
 """
 
-from src.core.geometry import Ponto, Reta, Wireframe, Curva2D, BSpline2D, Ponto3D, Objeto3D
+from src.core.geometry import (
+    Ponto, Reta, Wireframe, Curva2D, BSpline2D, Ponto3D, Objeto3D,
+    SuperficieBSpline3D,
+)
 
 
 class DescritorOBJ:
@@ -33,6 +36,20 @@ class DescritorOBJ:
 
         r, g, b = DescritorOBJ._hex_para_rgb_normalizado(objeto.cor)
         linhas.append(f"usercor {r:.4f} {g:.4f} {b:.4f}")
+
+        if objeto.tipo == "SuperficieBSpline3D":
+            linhas.append("usertype SuperficieBSpline3D")
+            linhas_qtd = len(objeto.matriz_controle)
+            colunas_qtd = len(objeto.matriz_controle[0]) if linhas_qtd else 0
+            linhas.append(f"usersteps {getattr(objeto, 'passos', 10)}")
+            for linha in objeto.matriz_controle:
+                for p in linha:
+                    linhas.append(f"v {p.x} {p.y} {p.z}")
+            indices = " ".join(
+                str(offset_vertice + i + 1)
+                for i in range(linhas_qtd * colunas_qtd))
+            linhas.append(f"bsplinesurf {linhas_qtd} {colunas_qtd} {indices}")
+            return linhas, linhas_qtd * colunas_qtd
 
         if objeto.tipo == "Objeto3D":
             linhas.append("usertype Objeto3D")
@@ -117,6 +134,7 @@ def carregar_obj(filepath):
     cor_atual = "#000000"
     tipo_atual = None
     fill_atual = False
+    passos_atual = 10
 
     # Estado para acumular segmentos de Objeto3D (múltiplos 'l' por objeto)
     nome_3d = None
@@ -145,6 +163,7 @@ def carregar_obj(filepath):
                 cor_atual = "#000000"
                 tipo_atual = None
                 fill_atual = False
+                passos_atual = 10
 
             elif token == "usercor":
                 if len(partes) >= 4:
@@ -161,6 +180,10 @@ def carregar_obj(filepath):
             elif token == "userfill":
                 if len(partes) >= 2:
                     fill_atual = partes[1] == "1"
+
+            elif token == "usersteps":
+                if len(partes) >= 2:
+                    passos_atual = int(partes[1])
 
             elif token == "v":
                 x = float(partes[1])
@@ -231,6 +254,25 @@ def carregar_obj(filepath):
                 pontos = [vertices_globais[i - 1][:2] for i in indices]
                 objetos.append(BSpline2D(nome_atual, pontos, cor_atual))
                 nome_atual = None; tipo_atual = None; fill_atual = False
+
+            elif token == "bsplinesurf":
+                if nome_atual is None:
+                    nome_atual = f"superficie_{len(objetos)}"
+                linhas_qtd = int(partes[1])
+                colunas_qtd = int(partes[2])
+                indices = [int(idx) for idx in partes[3:]]
+                if len(indices) != linhas_qtd * colunas_qtd:
+                    raise ValueError("Quantidade de indices da superficie B-Spline invalida.")
+                matriz = []
+                pos = 0
+                for _ in range(linhas_qtd):
+                    linha = []
+                    for _ in range(colunas_qtd):
+                        linha.append(Ponto3D(*vertices_globais[indices[pos] - 1]))
+                        pos += 1
+                    matriz.append(linha)
+                objetos.append(SuperficieBSpline3D(nome_atual, matriz, cor_atual, passos_atual))
+                nome_atual = None; tipo_atual = None; fill_atual = False; passos_atual = 10
 
     _finalizar_objeto_3d()
     return objetos
