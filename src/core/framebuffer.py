@@ -1,10 +1,15 @@
 # src/core/framebuffer.py
 """Framebuffer proprio para rasterizacao (Trabalhos 2.1, 2.2 e 2.3).
 
-Armazena a cor em um buffer RGB (linha-major, 3 bytes por pixel) e a
-profundidade em um Z-buffer de ponto flutuante. Oferece rasterizacao de
-linhas (Bresenham), trapezios, poligonos (scan-line), triangulos com
-Z-buffer e triangulos com iluminacao de Phong por pixel.
+Armazena a cor em um buffer RGBA (linha-major, 4 bytes por pixel) e a
+profundidade em um Z-buffer de ponto flutuante. O canal alpha permite compor
+o resultado sobre o desenho vetorial do SGI (pixels nao pintados ficam
+transparentes). Oferece rasterizacao de linhas (Bresenham), trapezios,
+poligonos (decomposicao em trapezios), triangulos com Z-buffer e triangulos
+com iluminacao de Phong por pixel.
+
+Hierarquia das primitivas do Trabalho 2.1:
+    draw_pixel  ->  draw_line (Bresenham)  ->  draw_trapezoid  ->  draw_polygon
 """
 import numpy as np
 from PyQt6.QtGui import QImage
@@ -16,32 +21,42 @@ class Framebuffer:
     def __init__(self, width: int, height: int):
         self.width = max(1, int(width))
         self.height = max(1, int(height))
-        # Buffer de cor: (height, width, 3) uint8 em ordem RGB, linha-major.
-        self.buffer = np.empty((self.height, self.width, 3), dtype=np.uint8)
+        # Buffer de cor: (height, width, 4) uint8 em ordem RGBA, linha-major.
+        self.buffer = np.empty((self.height, self.width, 4), dtype=np.uint8)
         # Z-buffer: (height, width) float, inicializado com +infinito.
         self.zbuffer = np.empty((self.height, self.width), dtype=np.float64)
         # Quando False, draw_pixel_depth ignora a checagem de profundidade.
         self.usar_zbuffer = True
-        self.clear()
+        self.clear(transparente=True)
 
     # ------------------------------------------------------------------
     # Operacoes basicas
     # ------------------------------------------------------------------
-    def clear(self, color=(255, 255, 255)):
-        """Limpa a cor de fundo e reseta o Z-buffer para +infinito."""
-        self.buffer[:, :, 0] = int(color[0])
-        self.buffer[:, :, 1] = int(color[1])
-        self.buffer[:, :, 2] = int(color[2])
+    def clear(self, color=(255, 255, 255), transparente=False):
+        """Limpa a cor e reseta o Z-buffer para +infinito.
+
+        Com `transparente=True` o fundo fica transparente (alpha 0), o que
+        permite compor o buffer sobre o desenho vetorial. Caso contrario,
+        preenche com `color` opaco.
+        """
+        if transparente:
+            self.buffer[:, :, :] = 0            # RGBA = 0 -> transparente
+        else:
+            self.buffer[:, :, 0] = int(color[0])
+            self.buffer[:, :, 1] = int(color[1])
+            self.buffer[:, :, 2] = int(color[2])
+            self.buffer[:, :, 3] = 255          # opaco
         self.zbuffer[:, :] = np.inf
 
     def draw_pixel(self, x, y, color=(0, 0, 0)):
-        """Desenha um pixel sem checar profundidade."""
+        """Desenha um pixel opaco sem checar profundidade."""
         xi = int(round(x))
         yi = int(round(y))
         if 0 <= xi < self.width and 0 <= yi < self.height:
             self.buffer[yi, xi, 0] = int(color[0])
             self.buffer[yi, xi, 1] = int(color[1])
             self.buffer[yi, xi, 2] = int(color[2])
+            self.buffer[yi, xi, 3] = 255
 
     def draw_pixel_depth(self, x, y, z, color=(0, 0, 0)):
         """Desenha um pixel usando o Z-buffer (so pinta se z estiver mais proximo)."""
@@ -53,6 +68,7 @@ class Framebuffer:
                 self.buffer[yi, xi, 0] = int(color[0])
                 self.buffer[yi, xi, 1] = int(color[1])
                 self.buffer[yi, xi, 2] = int(color[2])
+                self.buffer[yi, xi, 3] = 255
 
     # ------------------------------------------------------------------
     # Trabalho 2.1 - Bresenham, trapezio e poligono
@@ -105,40 +121,53 @@ class Framebuffer:
             x_dir = x1_top + (x1_bot - x1_top) * t
             xi = int(round(min(x_esq, x_dir)))
             xf = int(round(max(x_esq, x_dir)))
-            for x in range(xi, xf + 1):
-                self.draw_pixel(x, y, color)
+            # Preenche a scanline horizontal com Bresenham (draw_line).
+            self.draw_line(xi, y, xf, y, color)
+
+    def _intersecoes_scanline(self, vertices, yv):
+        """Retorna as interseções (x ordenados) das arestas com a reta Y=yv."""
+        n = len(vertices)
+        xs = []
+        for i in range(n):
+            x0, y0 = vertices[i][0], vertices[i][1]
+            x1, y1 = vertices[(i + 1) % n][0], vertices[(i + 1) % n][1]
+            if y0 == y1:
+                continue  # aresta horizontal nao gera intersecao
+            if min(y0, y1) <= yv < max(y0, y1):
+                t = (yv - y0) / (y1 - y0)
+                xs.append(x0 + t * (x1 - x0))
+        xs.sort()
+        return xs
 
     def draw_polygon(self, vertices, color=(0, 0, 0)):
-        """Preenche um poligono por varredura de scan-line (Active Edge Table).
+        """Preenche um poligono por decomposição em trapézios via scan-line.
 
-        Suporta poligonos convexos e concavos simples. `vertices` e uma lista
-        de tuplas (x, y).
+        Entre cada par de scanlines a região do polígono é preenchida com
+        `draw_trapezoid`. Quando a topologia muda dentro da faixa (ex.: um
+        vértice côncavo), cai para preenchimento por spans (draw_line).
+        `vertices` é uma lista de tuplas (x, y).
         """
         if len(vertices) < 3:
             return
-        n = len(vertices)
         ys = [v[1] for v in vertices]
         y_min = int(np.floor(min(ys)))
         y_max = int(np.ceil(max(ys)))
 
-        for y in range(y_min, y_max + 1):
-            yc = y + 0.5  # centro do scanline
-            intersecoes = []
-            for i in range(n):
-                x0, y0 = vertices[i][0], vertices[i][1]
-                x1, y1 = vertices[(i + 1) % n][0], vertices[(i + 1) % n][1]
-                if y0 == y1:
-                    continue  # aresta horizontal nao gera intersecao
-                if min(y0, y1) <= yc < max(y0, y1):
-                    t = (yc - y0) / (y1 - y0)
-                    intersecoes.append(x0 + t * (x1 - x0))
-            intersecoes.sort()
-            # Preenche entre pares de intersecoes (regra par/impar).
-            for k in range(0, len(intersecoes) - 1, 2):
-                xa = int(np.ceil(intersecoes[k]))
-                xb = int(np.floor(intersecoes[k + 1]))
-                for x in range(xa, xb + 1):
-                    self.draw_pixel(x, y, color)
+        for y in range(y_min, y_max):
+            topo = self._intersecoes_scanline(vertices, float(y))
+            base = self._intersecoes_scanline(vertices, float(y + 1))
+            # Caso regular (convexo ou faixa estável): pares casam -> trapézios.
+            if len(topo) == len(base) and len(topo) % 2 == 0 and topo:
+                for k in range(0, len(topo), 2):
+                    self.draw_trapezoid(topo[k], topo[k + 1], y,
+                                        base[k], base[k + 1], y + 1, color)
+            else:
+                # Faixa com mudança de topologia: preenche a linha por spans.
+                meio = self._intersecoes_scanline(vertices, y + 0.5)
+                for k in range(0, len(meio) - 1, 2):
+                    xa = int(np.ceil(meio[k]))
+                    xb = int(np.floor(meio[k + 1]))
+                    self.draw_line(xa, y, xb, y, color)
 
     # ------------------------------------------------------------------
     # Rasterizador vetorizado de triangulo (barycentric por bounding box)
@@ -200,7 +229,7 @@ class Framebuffer:
         sub_b = self.buffer[miny:maxy + 1, minx:maxx + 1]
 
         sub_z[passa] = z[passa]
-        sub_b[passa] = np.array([int(color[0]), int(color[1]), int(color[2])],
+        sub_b[passa] = np.array([int(color[0]), int(color[1]), int(color[2]), 255],
                                 dtype=np.uint8)
 
     # ------------------------------------------------------------------
@@ -243,16 +272,21 @@ class Framebuffer:
         cores = calcular_phong_array(pontos, normais, olho, luz,
                                      material, luz_ambiente)
 
+        # Monta RGBA (alpha opaco) para os pixels que passam.
+        rgba = np.empty((cores.shape[0], 4), dtype=np.uint8)
+        rgba[:, :3] = (cores * 255).astype(np.uint8)
+        rgba[:, 3] = 255
+
         sub_z[passa] = z[passa]
-        sub_b[passa] = (cores * 255).astype(np.uint8)
+        sub_b[passa] = rgba
 
     # ------------------------------------------------------------------
     # Exibicao
     # ------------------------------------------------------------------
     def to_qimage(self) -> QImage:
-        """Converte o buffer de cor para um QImage exibivel."""
+        """Converte o buffer de cor (RGBA) para um QImage exibivel."""
         dados = self.buffer.tobytes()
         imagem = QImage(dados, self.width, self.height,
-                        self.width * 3, QImage.Format.Format_RGB888)
+                        self.width * 4, QImage.Format.Format_RGBA8888)
         # .copy() desvincula o QImage do buffer temporario (evita dangling).
         return imagem.copy()

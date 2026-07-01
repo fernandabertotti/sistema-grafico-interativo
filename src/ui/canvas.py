@@ -118,20 +118,25 @@ class Canvas(QWidget):
 
         modo = self.modo_render_3d
 
-        # ---- Passe 1: 3D sólido/Phong no framebuffer ----
-        if modo in ("solido", "phong"):
-            fb = self.framebuffer
-            fb.usar_zbuffer = self.usar_zbuffer
-            fb.clear()
-            desenhou_algo = False
-            for obj in self.display_file.objetos:
-                if obj.tipo == "Objeto3D" and getattr(obj, "triangulos", None):
-                    self._rasterizar_objeto3d(obj, modo)
+        # ---- Passe 1: rasterização no framebuffer próprio ----
+        # Preenchimentos 2D (draw_polygon) + sólidos 3D (Z-buffer/Phong). O buffer
+        # é transparente onde nada foi pintado, para compor sobre o vetorial.
+        fb = self.framebuffer
+        fb.usar_zbuffer = self.usar_zbuffer
+        fb.clear(transparente=True)
+        desenhou_algo = False
+        for obj in self.display_file.objetos:
+            if obj.tipo == "Wireframe" and getattr(obj, "preenchido", False):
+                if self._preencher_wireframe_fb(obj):
                     desenhou_algo = True
-            if desenhou_algo:
-                painter.drawImage(QPointF(vp.xmin, vp.ymin), fb.to_qimage())
+            elif (obj.tipo == "Objeto3D" and getattr(obj, "triangulos", None)
+                  and modo in ("solido", "phong")):
+                self._rasterizar_objeto3d(obj, modo)
+                desenhou_algo = True
+        if desenhou_algo:
+            painter.drawImage(QPointF(vp.xmin, vp.ymin), fb.to_qimage())
 
-        # ---- Passe 2: desenho vetorial (2D + 3D arame) ----
+        # ---- Passe 2: desenho vetorial (traços) por cima ----
         for obj in self.display_file.objetos:
             pen = QPen(QColor(obj.cor), 3)
             painter.setPen(pen)
@@ -174,15 +179,15 @@ class Canvas(QWidget):
                            else clip_reta_liang_barsky)
 
                 if getattr(obj, 'preenchido', False):
-                    # Polígono preenchido → Sutherland-Hodgman
+                    # Preenchimento já foi rasterizado no framebuffer (Passe 1);
+                    # aqui só traçamos o contorno do polígono clipado.
                     clipados = clip_poligono_sutherland_hodgman(coords_scn)
                     if len(clipados) >= 3:
                         coords_vp = [self.viewport.viewport_transform_scn(p)
                                      for p in clipados]
                         poligono = QPolygonF([QPointF(x, y) for x, y in coords_vp])
-                        painter.setBrush(QBrush(QColor(obj.cor)))
-                        painter.drawPolygon(poligono)
                         painter.setBrush(QBrush())
+                        painter.drawPolygon(poligono)
                 else:
                     # Wireframe → clipa cada aresta com o algoritmo de reta escolhido
                     n = len(coords_scn)
@@ -235,6 +240,24 @@ class Canvas(QWidget):
         """Converte '#RRGGBB' em tupla (r, g, b) de inteiros."""
         c = QColor(cor_hex)
         return (c.red(), c.green(), c.blue())
+
+    def _preencher_wireframe_fb(self, obj):
+        """Preenche um wireframe 2D no framebuffer via draw_polygon (Trabalho 2.1).
+
+        Faz o clipping (Sutherland-Hodgman) em SCN, converte para coordenadas
+        locais do framebuffer e chama draw_polygon. Retorna True se preencheu.
+        """
+        coords_scn = [self.window.generate_scn(pt) for pt in obj.pontos]
+        clipados = clip_poligono_sutherland_hodgman(coords_scn)
+        if len(clipados) < 3:
+            return False
+        cor = self._cor_rgb(obj.cor)
+        pts_fb = []
+        for p in clipados:
+            x_vp, y_vp = self.viewport.viewport_transform_scn(p)
+            pts_fb.append((x_vp - self.viewport.xmin, y_vp - self.viewport.ymin))
+        self.framebuffer.draw_polygon(pts_fb, cor)
+        return True
 
     def _mundo_para_fb(self, ponto_mundo):
         """Projeta um ponto do mundo para (x_fb, y_fb, z_view) no framebuffer."""

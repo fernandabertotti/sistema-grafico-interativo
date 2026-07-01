@@ -867,8 +867,8 @@ class MainWindow(QMainWindow):
         painel_container.addLayout(coluna_esq)
         painel_container.addLayout(coluna_dir)
 
-        # --- Grupo 1: Objetos ---
-        grupo_objetos = QGroupBox("Objetos")
+        # --- Grupo 1: Objetos 2D ---
+        grupo_objetos = QGroupBox("Objetos 2D")
         layout_objetos = QVBoxLayout(grupo_objetos)
 
         self.list_widget = QListWidget()
@@ -1708,5 +1708,10 @@ class MainWindow(QMainWindow):
             item = QListWidgetItem(f"{obj.nome} [Objeto3D]")
             item.setData(Qt.ItemDataRole.UserRole, obj.nome)
             self.list_widget_3d.addItem(item)
+
+        # Câmera inicial em ângulo (isométrico) para revelar o volume 3D
+        # dos objetos ao ativar os modos Sólido/Phong.
+        self.window3d.rotate_v(-35)
+        self.window3d.rotate_u(25)
 
         self.canvas.update()
