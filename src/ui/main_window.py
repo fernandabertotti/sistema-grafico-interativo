@@ -1553,39 +1553,48 @@ class MainWindow(QMainWindow):
         self.check_zbuffer.toggled.connect(self._toggle_zbuffer)
         layout.addWidget(self.check_zbuffer)
 
+        # Controles de luz + material: só fazem sentido no modo Phong, por isso
+        # ficam num painel que aparece/some conforme o modo escolhido.
+        self._painel_phong = QWidget()
+        layout_phong = QVBoxLayout(self._painel_phong)
+        layout_phong.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._painel_phong)
+
         # Posição da luz via sliders arrastáveis (arraste para ver o brilho mover).
-        layout.addWidget(QLabel("Posição da luz (arraste):"))
-        self._label_lx, self._slider_lx = self._criar_slider_luz("X", 200, layout)
-        self._label_ly, self._slider_ly = self._criar_slider_luz("Y", 200, layout)
-        self._label_lz, self._slider_lz = self._criar_slider_luz("Z", -300, layout)
+        layout_phong.addWidget(QLabel("Posição da luz (arraste):"))
+        self._label_lx, self._slider_lx = self._criar_slider_luz("X", 200, layout_phong)
+        self._label_ly, self._slider_ly = self._criar_slider_luz("Y", 200, layout_phong)
+        self._label_lz, self._slider_lz = self._criar_slider_luz("Z", -300, layout_phong)
 
         # Material do objeto (modelo de Phong): quanto ele reflete de cada
-        # componente de luz. Só afetam o modo Phong.
+        # componente de luz.
         rotulo_material = QLabel("Material do objeto (Phong):")
         rotulo_material.setStyleSheet("font-weight: bold;")
-        layout.addWidget(rotulo_material)
+        layout_phong.addWidget(rotulo_material)
 
         self._label_ka = QLabel()
         self._slider_ka = self._criar_slider_coef(0, 100, 10, self._atualizar_material)
-        layout.addWidget(self._label_ka)
-        layout.addWidget(self._slider_ka)
+        layout_phong.addWidget(self._label_ka)
+        layout_phong.addWidget(self._slider_ka)
 
         self._label_kd = QLabel()
         self._slider_kd = self._criar_slider_coef(0, 100, 70, self._atualizar_material)
-        layout.addWidget(self._label_kd)
-        layout.addWidget(self._slider_kd)
+        layout_phong.addWidget(self._label_kd)
+        layout_phong.addWidget(self._slider_kd)
 
         self._label_ks = QLabel()
         self._slider_ks = self._criar_slider_coef(0, 100, 50, self._atualizar_material)
-        layout.addWidget(self._label_ks)
-        layout.addWidget(self._slider_ks)
+        layout_phong.addWidget(self._label_ks)
+        layout_phong.addWidget(self._slider_ks)
 
         self._label_shine = QLabel()
         self._slider_shine = self._criar_slider_coef(1, 128, 32, self._atualizar_material)
-        layout.addWidget(self._label_shine)
-        layout.addWidget(self._slider_shine)
+        layout_phong.addWidget(self._label_shine)
+        layout_phong.addWidget(self._slider_shine)
 
         self._atualizar_labels_material()
+        # Começa oculto (o modo inicial é Arame, não Phong).
+        self._painel_phong.setVisible(False)
         return grupo
 
     def _criar_slider_coef(self, minimo, maximo, valor, callback):
@@ -1626,6 +1635,8 @@ class MainWindow(QMainWindow):
     def _set_modo_render(self, modo):
         """Define o modo de exibição 3D (arame/solido/phong) para todos os objetos 3D."""
         self.canvas.modo_render_3d = modo
+        # Controles de luz/material só aparecem no modo Phong.
+        self._painel_phong.setVisible(modo == "phong")
         self.canvas.update()
 
     def _toggle_zbuffer(self, checked):
