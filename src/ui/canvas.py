@@ -32,16 +32,10 @@ class Canvas(QWidget):
         # Calcula a proporção da viewport
         self.viewport_aspect = vp_width / vp_height if vp_height != 0 else 1.0
 
-        # --- Modo de exibicao dos objetos 3D (Trabalhos 2.1, 2.2 e 2.3) ---
-        #   "arame"  -> wireframe vetorial (QPainter)
-        #   "solido" -> triangulos rasterizados + Z-buffer (framebuffer)
-        #   "phong"  -> solido com iluminacao de Phong por pixel
-        self.modo_render_3d = "arame"
-        # Cena ativa: "2d" ou "3d". Os dois tipos nunca aparecem juntos.
-        self.cena_ativa = "3d"
-        self.usar_zbuffer = True        # checagem de profundidade nos triangulos
+        self.modo_render_3d = "arame"  # "arame", "solido" ou "phong"
+        self.cena_ativa = "3d"         # "2d" ou "3d"
+        self.usar_zbuffer = True
         self.framebuffer = Framebuffer(int(vp_width), int(vp_height))
-        # Parametros de iluminacao (ajustaveis pela UI).
         self.luz = LuzPontual([200.0, 200.0, -300.0], (1.0, 1.0, 1.0))
         self.material = MaterialPhong()
         self.luz_ambiente = (0.2, 0.2, 0.2)
@@ -54,7 +48,6 @@ class Canvas(QWidget):
         super().resizeEvent(event)
 
     def _criar_framebuffer(self):
-        """Recria o framebuffer com as dimensoes atuais da viewport."""
         largura = int(self.viewport.xmax - self.viewport.xmin)
         altura = int(self.viewport.ymax - self.viewport.ymin)
         if largura > 0 and altura > 0:
@@ -103,14 +96,7 @@ class Canvas(QWidget):
         return self.viewport.viewport_transform_scn(ponto_scn)
 
     def paintEvent(self, event):
-        """Desenha todos os objetos do Display File.
-
-        Dois passes:
-          1) Objetos 3D com faces em modo Sólido/Phong -> rasterizados no
-             framebuffer e exibidos como imagem.
-          2) Desenho vetorial (QPainter): objetos 2D e objetos 3D em Arame
-             (ou 3D sem faces). O vetorial vem por cima do framebuffer.
-        """
+        """Desenha todos os objetos do Display File."""
         painter = QPainter(self)
 
         # Desenha a moldura vermelha da viewport
@@ -124,9 +110,7 @@ class Canvas(QWidget):
         modo = self.modo_render_3d
         cena = self.cena_ativa
 
-        # ---- Passe 1: rasterização no framebuffer próprio ----
-        # 2D: preenchimentos via draw_polygon. 3D: faces sólidas/Phong. O buffer
-        # é transparente onde nada foi pintado, para compor sobre o vetorial.
+        # Passe 1: rasterizacao no framebuffer (preenchimentos 2D e faces 3D)
         fb = self.framebuffer
         fb.usar_zbuffer = self.usar_zbuffer
         fb.clear(transparente=True)
@@ -146,8 +130,7 @@ class Canvas(QWidget):
         if desenhou_algo:
             painter.drawImage(QPointF(vp.xmin, vp.ymin), fb.to_qimage())
 
-        # ---- Passe 2: desenho vetorial (traços) por cima ----
-        # A cena ativa filtra os tipos: 2D e 3D nunca aparecem juntos.
+        # Passe 2: desenho vetorial por cima (filtrado pela cena ativa)
         for obj in self.display_file.objetos:
             tipo_2d = obj.tipo in ("Ponto", "Reta", "Wireframe", "Curva2D", "BSpline2D")
             tipo_3d = obj.tipo in ("Objeto3D", "SuperficieBSpline3D")
@@ -160,7 +143,6 @@ class Canvas(QWidget):
             painter.setPen(pen)
 
             if obj.tipo == "Objeto3D":
-                # Se já foi rasterizado como sólido, não redesenha em arame.
                 if modo in ("solido", "phong") and getattr(obj, "triangulos", None):
                     continue
                 self._desenhar_wireframe_3d(painter, obj.segmentos)
@@ -199,8 +181,7 @@ class Canvas(QWidget):
                            else clip_reta_liang_barsky)
 
                 if getattr(obj, 'preenchido', False):
-                    # Preenchimento já foi rasterizado no framebuffer (Passe 1);
-                    # aqui só traçamos o contorno do polígono clipado.
+                    # preenchimento vem do framebuffer; aqui so o contorno
                     clipados = clip_poligono_sutherland_hodgman(coords_scn)
                     if len(clipados) >= 3:
                         coords_vp = [self.viewport.viewport_transform_scn(p)
@@ -253,20 +234,11 @@ class Canvas(QWidget):
                     else:
                         anterior_vp = None
 
-    # ------------------------------------------------------------------
-    # Auxiliares de renderização 3D
-    # ------------------------------------------------------------------
     def _cor_rgb(self, cor_hex):
-        """Converte '#RRGGBB' em tupla (r, g, b) de inteiros."""
         c = QColor(cor_hex)
         return (c.red(), c.green(), c.blue())
 
     def _preencher_wireframe_fb(self, obj):
-        """Preenche um wireframe 2D no framebuffer via draw_polygon (Trabalho 2.1).
-
-        Faz o clipping (Sutherland-Hodgman) em SCN, converte para coordenadas
-        locais do framebuffer e chama draw_polygon. Retorna True se preencheu.
-        """
         coords_scn = [self.window.generate_scn(pt) for pt in obj.pontos]
         clipados = clip_poligono_sutherland_hodgman(coords_scn)
         if len(clipados) < 3:
@@ -280,25 +252,15 @@ class Canvas(QWidget):
         return True
 
     def _mundo_para_fb(self, ponto_mundo):
-        """Projeta um ponto do mundo para (x_fb, y_fb, z_view) no framebuffer.
-
-        Respeita o modo de perspectiva (paralela x perspectiva), igual ao arame.
-        """
         if self.modo_perspectiva:
             x_scn, y_scn, z_view = self.window3d.generate_scn_3d_perspective_with_z(
                 ponto_mundo, self.distancia_focal)
         else:
             x_scn, y_scn, z_view = self.window3d.generate_scn_3d_with_z(ponto_mundo)
         x_vp, y_vp = self.viewport.viewport_transform_scn((x_scn, y_scn))
-        # Coordenadas locais ao framebuffer (origem no canto da viewport).
         return (x_vp - self.viewport.xmin, y_vp - self.viewport.ymin, z_view)
 
     def _posicao_olho(self):
-        """Posição do observador (centro de projeção) no mundo, para o especular.
-
-        Deriva do eixo de visão da câmera, para o brilho especular reagir à
-        rotação. Em perspectiva o olho fica a `d` atrás do plano de visão.
-        """
         import numpy as np
         _, _, n = self.window3d._axes()
         vrp = np.array(self.window3d.vrp, dtype=float)
@@ -306,7 +268,6 @@ class Canvas(QWidget):
         return tuple(vrp - dist * n)
 
     def _desenhar_wireframe_3d(self, painter, segmentos):
-        """Desenha uma lista de segmentos 3D como arame (projeção + clipping)."""
         fn_clip = (clip_reta_cohen_sutherland
                    if self.algoritmo_clip_reta == "CS"
                    else clip_reta_liang_barsky)
@@ -327,10 +288,6 @@ class Canvas(QWidget):
                                  int(vp2[0]), int(vp2[1]))
 
     def _triangulos_do_objeto(self, obj):
-        """Retorna os triângulos (com normais) de um objeto 3D, ou None.
-
-        Objeto3D já traz `triangulos`; a superfície B-Spline gera a malha na hora.
-        """
         if obj.tipo == "Objeto3D":
             return obj.triangulos
         if obj.tipo == "SuperficieBSpline3D":
@@ -339,7 +296,6 @@ class Canvas(QWidget):
         return None
 
     def _rasterizar_faces(self, triangulos, cor_hex, modo):
-        """Rasteriza uma lista de triângulos no framebuffer (sólido ou Phong)."""
         cor = self._cor_rgb(cor_hex)
         olho = self._posicao_olho()
         for tri in triangulos:
@@ -349,12 +305,11 @@ class Canvas(QWidget):
             f1 = self._mundo_para_fb(vw1)
             f2 = self._mundo_para_fb(vw2)
             if modo == "phong":
-                # Vértice completo: (x_fb, y_fb, z_view, x_world, y_world, z_world)
                 v0 = (f0[0], f0[1], f0[2], vw0[0], vw0[1], vw0[2])
                 v1 = (f1[0], f1[1], f1[2], vw1[0], vw1[1], vw1[2])
                 v2 = (f2[0], f2[1], f2[2], vw2[0], vw2[1], vw2[2])
                 self.framebuffer.draw_triangle_phong(
                     v0, v1, v2, n0, n1, n2,
                     self.material, self.luz, olho, self.luz_ambiente)
-            else:  # sólido: cor plana + Z-buffer (Trabalho 2.2)
+            else:
                 self.framebuffer.draw_triangle_3d(f0, f1, f2, cor)

@@ -140,7 +140,7 @@ def carregar_obj(filepath):
     nome_3d = None
     cor_3d = "#000000"
     segmentos_3d = []
-    triangulos_3d = []  # faces trianguladas (para modos Sólido/Phong)
+    triangulos_3d = []
 
     def _finalizar_objeto_3d():
         nonlocal segmentos_3d, triangulos_3d, nome_3d, cor_3d
@@ -227,7 +227,7 @@ def carregar_obj(filepath):
                     indices.append(int(idx_str.split("/")[0]))
                 verts = [vertices_globais[i - 1] for i in indices]
 
-                # Face com vértices 3D (z != 0) → acumula arestas e faces em Objeto3D
+                # Face com vértices 3D (z != 0) → acumula arestas em Objeto3D
                 is_3d_face = any(abs(v[2]) > 1e-10 for v in verts)
                 if is_3d_face:
                     if nome_3d is None:
@@ -237,7 +237,6 @@ def carregar_obj(filepath):
                     for j in range(n_f):
                         segmentos_3d.append((Ponto3D(*verts[j]),
                                              Ponto3D(*verts[(j + 1) % n_f])))
-                    # Triangula a face (leque) para os modos Sólido/Phong.
                     for j in range(1, n_f - 1):
                         triangulos_3d.append(
                             triangulo_flat(verts[0], verts[j], verts[j + 1]))

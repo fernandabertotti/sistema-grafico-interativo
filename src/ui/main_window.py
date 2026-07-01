@@ -867,7 +867,7 @@ class MainWindow(QMainWindow):
         painel_container.addLayout(coluna_esq)
         painel_container.addLayout(coluna_dir)
 
-        # --- Grupo: Cena Ativa (2D x 3D, nunca ao mesmo tempo) ---
+        # --- Grupo: Cena Ativa ---
         grupo_cena = QGroupBox("Cena Ativa")
         layout_cena = QHBoxLayout(grupo_cena)
         self.radio_cena_2d = QRadioButton("2D")
@@ -974,9 +974,6 @@ class MainWindow(QMainWindow):
         grid_trl.addWidget(btn_y_neg, 2, 1)
         layout_nav.addLayout(grid_trl)
 
-        # (Z aproximar/afastar movidos para o grupo "Projeção 3D", pois só
-        #  têm efeito visível com a perspectiva ativada.)
-
         # Rotação
         layout_nav.addWidget(QLabel("Rotação"))
         rot_grid = QGridLayout()
@@ -1055,8 +1052,6 @@ class MainWindow(QMainWindow):
         self._label_modo_persp.setWordWrap(True)
         layout_persp.addWidget(self._label_modo_persp)
 
-        # Aproximar/afastar a câmera no eixo de visão (só tem efeito visível
-        # com a perspectiva ligada, por isso fica aqui).
         layout_persp.addWidget(QLabel("Câmera (eixo de visão):"))
         linha_z = QHBoxLayout()
         btn_z_pos = QPushButton("Z ↑ Aprox.")
@@ -1436,7 +1431,6 @@ class MainWindow(QMainWindow):
             transformacoes = dialogo.obter_transformacoes()
             if transformacoes:
                 if getattr(obj, "triangulos", None):
-                    # Transforma arame E faces (vértices + normais) juntos.
                     obj.segmentos, obj.triangulos = \
                         Transform3D3D.aplicar_lista_transformacoes_com_faces(
                             obj.segmentos, obj.triangulos, transformacoes)
@@ -1528,14 +1522,12 @@ class MainWindow(QMainWindow):
         self._atualizar_label_modo()
         self.canvas.update()
 
-    # --- Exibição 3D: Arame / Sólido / Phong (Trabalhos 2.1, 2.2 e 2.3) ---
+    # --- Exibição 3D: Arame / Sólido / Phong ---
 
     def _criar_grupo_shading(self):
-        """Monta o grupo de controles de exibição 3D e iluminação de Phong."""
         grupo = QGroupBox("Exibição 3D")
         layout = QVBoxLayout(grupo)
 
-        # Modo de exibição dos objetos 3D (aplicado a todos de uma vez).
         self.radio_arame = QRadioButton("Arame (wireframe)")
         self.radio_solido = QRadioButton("Sólido (Z-buffer)")
         self.radio_phong = QRadioButton("Phong (iluminação)")
@@ -1553,21 +1545,17 @@ class MainWindow(QMainWindow):
         self.check_zbuffer.toggled.connect(self._toggle_zbuffer)
         layout.addWidget(self.check_zbuffer)
 
-        # Controles de luz + material: só fazem sentido no modo Phong, por isso
-        # ficam num painel que aparece/some conforme o modo escolhido.
+        # painel de luz + material (visível só no modo Phong)
         self._painel_phong = QWidget()
         layout_phong = QVBoxLayout(self._painel_phong)
         layout_phong.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._painel_phong)
 
-        # Posição da luz via sliders arrastáveis (arraste para ver o brilho mover).
         layout_phong.addWidget(QLabel("Posição da luz (arraste):"))
         self._label_lx, self._slider_lx = self._criar_slider_luz("X", 200, layout_phong)
         self._label_ly, self._slider_ly = self._criar_slider_luz("Y", 200, layout_phong)
         self._label_lz, self._slider_lz = self._criar_slider_luz("Z", -300, layout_phong)
 
-        # Material do objeto (modelo de Phong): quanto ele reflete de cada
-        # componente de luz.
         rotulo_material = QLabel("Material do objeto (Phong):")
         rotulo_material.setStyleSheet("font-weight: bold;")
         layout_phong.addWidget(rotulo_material)
@@ -1593,7 +1581,6 @@ class MainWindow(QMainWindow):
         layout_phong.addWidget(self._slider_shine)
 
         self._atualizar_labels_material()
-        # Começa oculto (o modo inicial é Arame, não Phong).
         self._painel_phong.setVisible(False)
         return grupo
 
@@ -1606,7 +1593,6 @@ class MainWindow(QMainWindow):
         return slider
 
     def _criar_slider_luz(self, eixo, valor, layout):
-        """Cria uma linha 'L<eixo>: [slider] valor' e a adiciona ao layout."""
         linha = QHBoxLayout()
         linha.addWidget(QLabel(f"L{eixo}:"))
         slider = QSlider(Qt.Orientation.Horizontal)
@@ -1628,14 +1614,11 @@ class MainWindow(QMainWindow):
         self._label_shine.setText(f"Brilho (Shininess): {self._slider_shine.value()}")
 
     def _set_cena(self, cena):
-        """Alterna entre a cena 2D e a 3D (os dois tipos nunca aparecem juntos)."""
         self.canvas.cena_ativa = cena
         self.canvas.update()
 
     def _set_modo_render(self, modo):
-        """Define o modo de exibição 3D (arame/solido/phong) para todos os objetos 3D."""
         self.canvas.modo_render_3d = modo
-        # Controles de luz/material só aparecem no modo Phong.
         self._painel_phong.setVisible(modo == "phong")
         self.canvas.update()
 
@@ -1693,7 +1676,6 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _quads_para_triangulos(vertices, quads, centro=None):
-        """Converte faces quadrangulares (índices) em triângulos com normal plana."""
         triangulos = []
         for a, b, c, d in quads:
             triangulos.append(triangulo_flat(vertices[a], vertices[b], vertices[c], centro))
@@ -1701,7 +1683,6 @@ class MainWindow(QMainWindow):
         return triangulos
 
     def _carregar_cena_inicial(self):
-        """Adiciona cubo e pirâmide (com faces) ao display file no startup."""
         # Cubo centrado na origem (size 100)
         cv = [
             (-50, -50, -50), (50, -50, -50), (50,  50, -50), (-50,  50, -50),
@@ -1710,7 +1691,6 @@ class MainWindow(QMainWindow):
         ce = [(0,1),(1,2),(2,3),(3,0), (4,5),(5,6),(6,7),(7,4),
               (0,4),(1,5),(2,6),(3,7)]
         cube_segs = [(Ponto3D(*cv[i]), Ponto3D(*cv[j])) for i, j in ce]
-        # Faces do cubo (quads) -> triângulos com normal plana orientada para fora.
         cube_quads = [(0,1,2,3), (4,5,6,7), (0,4,7,3),
                       (1,5,6,2), (3,7,6,2), (0,4,5,1)]
         cube_tris = self._quads_para_triangulos(cv, cube_quads, centro=(0,0,0))
@@ -1735,16 +1715,15 @@ class MainWindow(QMainWindow):
         ]
         piramide = Objeto3D("Piramide", pyr_segs, "#FF0000", triangulos=pyr_tris)
 
-        # Esfera fixa à esquerda (melhor objeto para demonstrar Phong).
+        # Esfera
         esf_tris = get_powergirl_triangles(centro=(-200.0, 0.0, 0.0))
         esf_segs = arestas_de_triangulos(esf_tris)
         esfera = Objeto3D("Esfera", esf_segs, "#CCA0FF", triangulos=esf_tris)
 
-        # Superfície B-Spline de exemplo (domo), bem abaixo dos demais objetos
-        # (que estão em y≈0) para não haver sobreposição. Sombreada em Sólido/Phong.
+        # Superfície B-Spline de exemplo (domo abaixo dos demais objetos)
         sx = [-150, -50, 50, 150]
         sz = [-150, -50, 50, 150]
-        base = -200  # deslocamento em Y (abaixo de tudo)
+        base = -200
         alt = [
             [base - 40, base - 10, base - 10, base - 40],
             [base - 10, base + 50, base + 50, base - 10],
@@ -1761,7 +1740,7 @@ class MainWindow(QMainWindow):
             item.setData(Qt.ItemDataRole.UserRole, obj.nome)
             self.list_widget_3d.addItem(item)
 
-        # --- Objetos 2D de exemplo (aparecem ao selecionar a Cena 2D) ---
+        # --- Objetos 2D de exemplo ---
         objetos_2d = [
             Ponto("Ponto", [(-320, 220)], "#000000"),
             Reta("Reta", [(-370, 250), (-170, 120)], "#FF0000"),
@@ -1779,8 +1758,7 @@ class MainWindow(QMainWindow):
             item = self.list_widget.item(self.list_widget.count() - 1)
             item.setData(Qt.ItemDataRole.UserRole, obj.nome)
 
-        # Câmera inicial em ângulo (isométrico) para revelar o volume 3D
-        # dos objetos ao ativar os modos Sólido/Phong.
+        # Câmera inicial em ângulo
         self.window3d.rotate_v(-35)
         self.window3d.rotate_u(25)
 

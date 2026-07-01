@@ -44,28 +44,16 @@ class Ponto3D:
 
 # Não herda ObjetoGrafico: base usa pontos 2D; Canvas identifica por obj.tipo (string).
 class Objeto3D:
-    """Objeto 3D com arestas (wireframe) e, opcionalmente, faces trianguladas.
-
-    - `segmentos`: arestas para o modo Arame.
-    - `triangulos`: lista de dicts {'v': [(x,y,z)*3], 'n': [(nx,ny,nz)*3]} para os
-      modos Sólido (Z-buffer) e Phong. Se None, o objeto só existe como arame.
-    """
     def __init__(self, nome: str, segmentos: List[Tuple["Ponto3D", "Ponto3D"]],
                  cor: str = "#000000", triangulos=None):
         self.nome = nome
-        self.segmentos = segmentos  # List[Tuple[Ponto3D, Ponto3D]]
+        self.segmentos = segmentos
         self.tipo = "Objeto3D"
         self.cor = cor
-        self.triangulos = triangulos  # list[dict] com 'v' e 'n', ou None
+        self.triangulos = triangulos
 
 
 def triangulo_flat(p0, p1, p2, centro=None):
-    """Cria um triângulo com normal plana (flat) única para os 3 vértices.
-
-    Se `centro` for dado, a normal é orientada para fora (apontando na direção
-    oposta ao centro do objeto). Caso contrário, usa a normal bruta da winding.
-    Retorna um dict {'v': [...], 'n': [...]}.
-    """
     a = np.array(p0, dtype=float)
     b = np.array(p1, dtype=float)
     c = np.array(p2, dtype=float)
@@ -84,7 +72,6 @@ def triangulo_flat(p0, p1, p2, centro=None):
 
 
 def arestas_de_triangulos(triangulos):
-    """Deriva a lista de arestas (segmentos wireframe) a partir dos triângulos."""
     vistos = set()
     segmentos = []
     for tri in triangulos:

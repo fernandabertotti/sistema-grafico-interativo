@@ -119,10 +119,6 @@ def gerar_segmentos_superficie_bspline(matriz_controle, passos=10):
 
 
 def _gerar_grade_patch(patch, passos):
-    """Gera a grade (passos+1)x(passos+1) de pontos 3D de um patch bicubico.
-
-    grade[u_idx][v_idx] é o ponto da superficie no parametro (u, v).
-    """
     curvas_v = [gerar_pontos_segmento_bspline_3d(*patch[linha], passos)
                 for linha in range(4)]
     grade = [[None] * (passos + 1) for _ in range(passos + 1)]
@@ -135,11 +131,6 @@ def _gerar_grade_patch(patch, passos):
 
 
 def gerar_triangulos_superficie_bspline(matriz_controle, passos=10):
-    """Gera os triangulos da superficie com normais por vertice (para Phong).
-
-    Retorna uma lista de dicts {'v': [(x,y,z)*3], 'n': [(nx,ny,nz)*3]}. As
-    normais sao estimadas por diferencas centrais na grade (suaves).
-    """
     linhas_count, colunas_count = validar_matriz_controle(matriz_controle)
     triangulos = []
 
@@ -152,7 +143,6 @@ def gerar_triangulos_superficie_bspline(matriz_controle, passos=10):
             n_v = len(grade[0])
             pts = np.array([[[p.x, p.y, p.z] for p in linha] for linha in grade])
 
-            # Normais por vertice: cross das tangentes (diferencas centrais).
             normais = np.zeros_like(pts)
             for a in range(n_u):
                 for b in range(n_v):
@@ -162,7 +152,6 @@ def gerar_triangulos_superficie_bspline(matriz_controle, passos=10):
                     norma = np.linalg.norm(nrm)
                     normais[a, b] = nrm / norma if norma > 1e-9 else (0.0, 0.0, 1.0)
 
-            # Dois triangulos por celula da grade.
             for a in range(n_u - 1):
                 for b in range(n_v - 1):
                     v00 = tuple(pts[a, b]);       n00 = tuple(normais[a, b])
