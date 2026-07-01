@@ -1521,26 +1521,16 @@ class MainWindow(QMainWindow):
         self.radio_solido.toggled.connect(lambda on: on and self._set_modo_render("solido"))
         self.radio_phong.toggled.connect(lambda on: on and self._set_modo_render("phong"))
 
-        self.check_zbuffer = QCheckBox("Usar Z-buffer")
+        self.check_zbuffer = QCheckBox("Usar Z-buffer (oclusão)")
         self.check_zbuffer.setChecked(True)
         self.check_zbuffer.toggled.connect(self._toggle_zbuffer)
         layout.addWidget(self.check_zbuffer)
 
-        btn_esfera = QPushButton("Adicionar esfera de teste")
-        btn_esfera.clicked.connect(self._adicionar_esfera_teste)
-        layout.addWidget(btn_esfera)
-
-        # Posição da luz (Lx, Ly, Lz) — valores iniciais iguais aos padrões do Canvas
-        layout.addWidget(QLabel("Posição da luz (Lx, Ly, Lz):"))
-        linha_luz = QHBoxLayout()
-        self.input_lx = QLineEdit("200"); self.input_lx.setFixedWidth(55)
-        self.input_ly = QLineEdit("200"); self.input_ly.setFixedWidth(55)
-        self.input_lz = QLineEdit("-300"); self.input_lz.setFixedWidth(55)
-        for inp in (self.input_lx, self.input_ly, self.input_lz):
-            inp.editingFinished.connect(self._atualizar_luz)
-            linha_luz.addWidget(inp)
-        linha_luz.addStretch()
-        layout.addLayout(linha_luz)
+        # Posição da luz via sliders arrastáveis (arraste para ver o brilho mover).
+        layout.addWidget(QLabel("Posição da luz (arraste):"))
+        self._label_lx, self._slider_lx = self._criar_slider_luz("X", 200, layout)
+        self._label_ly, self._slider_ly = self._criar_slider_luz("Y", 200, layout)
+        self._label_lz, self._slider_lz = self._criar_slider_luz("Z", -300, layout)
 
         # Coeficientes de material (Ka, Kd, Ks) e Shininess via sliders
         self._label_ka = QLabel()
@@ -1574,6 +1564,22 @@ class MainWindow(QMainWindow):
         slider.valueChanged.connect(callback)
         return slider
 
+    def _criar_slider_luz(self, eixo, valor, layout):
+        """Cria uma linha 'L<eixo>: [slider] valor' e a adiciona ao layout."""
+        linha = QHBoxLayout()
+        linha.addWidget(QLabel(f"L{eixo}:"))
+        slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setMinimum(-600)
+        slider.setMaximum(600)
+        slider.setValue(valor)
+        slider.valueChanged.connect(self._atualizar_luz)
+        linha.addWidget(slider)
+        rotulo = QLabel(str(valor))
+        rotulo.setFixedWidth(38)
+        linha.addWidget(rotulo)
+        layout.addLayout(linha)
+        return rotulo, slider
+
     def _atualizar_labels_material(self):
         self._label_ka.setText(f"Ka: {self._slider_ka.value() / 100.0:.2f}")
         self._label_kd.setText(f"Kd: {self._slider_kd.value() / 100.0:.2f}")
@@ -1590,13 +1596,13 @@ class MainWindow(QMainWindow):
         self.canvas.update()
 
     def _atualizar_luz(self):
-        try:
-            lx = float(self.input_lx.text())
-            ly = float(self.input_ly.text())
-            lz = float(self.input_lz.text())
-        except ValueError:
-            return
+        lx = self._slider_lx.value()
+        ly = self._slider_ly.value()
+        lz = self._slider_lz.value()
         self.canvas.luz.posicao[:] = [lx, ly, lz]
+        self._label_lx.setText(str(lx))
+        self._label_ly.setText(str(ly))
+        self._label_lz.setText(str(lz))
         self.canvas.update()
 
     def _atualizar_material(self):
@@ -1609,28 +1615,6 @@ class MainWindow(QMainWindow):
         self.canvas.material.ks[:] = [ks, ks, ks]
         self.canvas.material.shininess = shine
         self._atualizar_labels_material()
-        self.canvas.update()
-
-    def _adicionar_esfera_teste(self):
-        """Adiciona uma esfera de teste (Objeto3D com faces) para demonstrar Phong."""
-        nome_base = "Esfera"
-        nomes = [o.nome for o in self.display_file.obter_todos()]
-        nome = nome_base
-        contador = 1
-        while nome in nomes:
-            nome = f"{nome_base}_{contador}"
-            contador += 1
-        # Posiciona a esfera à esquerda, longe do cubo (origem) e da pirâmide (x=200).
-        triangulos = get_powergirl_triangles(centro=(-200.0, 0.0, 0.0))
-        segmentos = arestas_de_triangulos(triangulos)
-        obj = Objeto3D(nome, segmentos, "#CCA0FF", triangulos=triangulos)
-        self.display_file.adicionar_objeto(obj)
-        item = QListWidgetItem(f"{nome} [Objeto3D]")
-        item.setData(Qt.ItemDataRole.UserRole, nome)
-        self.list_widget_3d.addItem(item)
-        # Se ainda estiver em Arame, muda para Phong para visualizar o sombreamento.
-        if self.canvas.modo_render_3d == "arame":
-            self.radio_phong.setChecked(True)
         self.canvas.update()
 
     def keyPressEvent(self, event):
@@ -1703,7 +1687,12 @@ class MainWindow(QMainWindow):
         ]
         piramide = Objeto3D("Piramide", pyr_segs, "#FF0000", triangulos=pyr_tris)
 
-        for obj in (cubo, piramide):
+        # Esfera fixa à esquerda (melhor objeto para demonstrar Phong).
+        esf_tris = get_powergirl_triangles(centro=(-200.0, 0.0, 0.0))
+        esf_segs = arestas_de_triangulos(esf_tris)
+        esfera = Objeto3D("Esfera", esf_segs, "#CCA0FF", triangulos=esf_tris)
+
+        for obj in (cubo, piramide, esfera):
             self.display_file.adicionar_objeto(obj)
             item = QListWidgetItem(f"{obj.nome} [Objeto3D]")
             item.setData(Qt.ItemDataRole.UserRole, obj.nome)

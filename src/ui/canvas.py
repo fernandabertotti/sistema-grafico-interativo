@@ -260,11 +260,30 @@ class Canvas(QWidget):
         return True
 
     def _mundo_para_fb(self, ponto_mundo):
-        """Projeta um ponto do mundo para (x_fb, y_fb, z_view) no framebuffer."""
-        x_scn, y_scn, z_view = self.window3d.generate_scn_3d_with_z(ponto_mundo)
+        """Projeta um ponto do mundo para (x_fb, y_fb, z_view) no framebuffer.
+
+        Respeita o modo de perspectiva (paralela x perspectiva), igual ao arame.
+        """
+        if self.modo_perspectiva:
+            x_scn, y_scn, z_view = self.window3d.generate_scn_3d_perspective_with_z(
+                ponto_mundo, self.distancia_focal)
+        else:
+            x_scn, y_scn, z_view = self.window3d.generate_scn_3d_with_z(ponto_mundo)
         x_vp, y_vp = self.viewport.viewport_transform_scn((x_scn, y_scn))
         # Coordenadas locais ao framebuffer (origem no canto da viewport).
         return (x_vp - self.viewport.xmin, y_vp - self.viewport.ymin, z_view)
+
+    def _posicao_olho(self):
+        """Posição do observador (centro de projeção) no mundo, para o especular.
+
+        Deriva do eixo de visão da câmera, para o brilho especular reagir à
+        rotação. Em perspectiva o olho fica a `d` atrás do plano de visão.
+        """
+        import numpy as np
+        _, _, n = self.window3d._axes()
+        vrp = np.array(self.window3d.vrp, dtype=float)
+        dist = self.distancia_focal if self.modo_perspectiva else 10000.0
+        return tuple(vrp - dist * n)
 
     def _desenhar_wireframe_3d(self, painter, segmentos):
         """Desenha uma lista de segmentos 3D como arame (projeção + clipping)."""
@@ -290,7 +309,7 @@ class Canvas(QWidget):
     def _rasterizar_objeto3d(self, obj, modo):
         """Rasteriza as faces de um Objeto3D no framebuffer (sólido ou Phong)."""
         cor = self._cor_rgb(obj.cor)
-        olho = tuple(self.window3d.vrp)
+        olho = self._posicao_olho()
         for tri in obj.triangulos:
             vw0, vw1, vw2 = tri['v']
             n0, n1, n2 = tri['n']

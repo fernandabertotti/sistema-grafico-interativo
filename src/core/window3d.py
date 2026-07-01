@@ -78,6 +78,32 @@ class Window3D:
         half_v = (self.vmax - self.vmin) / 2.0
         return (x_vc / half_u, y_vc / half_v, z_vc)
 
+    def generate_scn_3d_perspective_with_z(self, ponto_mundo, d: float = 500.0):
+        """Como generate_scn_3d_perspective, mas também retorna z_view.
+
+        z_view é a profundidade na câmera (projeção sobre a VPN, antes da divisão
+        perspectiva) — usada pelo Z-buffer no framebuffer.
+        """
+        x, y, z = ponto_mundo
+        u_ax, v_ax, n_ax = self._axes()
+        vrp = np.array(self.vrp, dtype=float)
+
+        p = np.array([x, y, z], dtype=float) - vrp
+        x_vc = float(np.dot(p, u_ax))
+        y_vc = float(np.dot(p, v_ax))
+        z_vc = float(np.dot(p, n_ax))
+
+        denom = z_vc + d
+        if abs(denom) < 1e-10:
+            denom = 1e-10
+
+        x_proj = x_vc * d / denom
+        y_proj = y_vc * d / denom
+
+        half_u = (self.umax - self.umin) / 2.0
+        half_v = (self.vmax - self.vmin) / 2.0
+        return (x_proj / half_u, y_proj / half_v, z_vc)
+
     def generate_scn_3d_perspective(self, ponto_mundo, d: float = 500.0):
         x, y, z = ponto_mundo
         u_ax, v_ax, n_ax = self._axes()
