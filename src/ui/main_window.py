@@ -867,6 +867,21 @@ class MainWindow(QMainWindow):
         painel_container.addLayout(coluna_esq)
         painel_container.addLayout(coluna_dir)
 
+        # --- Grupo: Cena Ativa (2D x 3D, nunca ao mesmo tempo) ---
+        grupo_cena = QGroupBox("Cena Ativa")
+        layout_cena = QHBoxLayout(grupo_cena)
+        self.radio_cena_2d = QRadioButton("2D")
+        self.radio_cena_3d = QRadioButton("3D")
+        self.radio_cena_3d.setChecked(True)
+        grupo_cena_botoes = QButtonGroup(self)
+        grupo_cena_botoes.addButton(self.radio_cena_2d)
+        grupo_cena_botoes.addButton(self.radio_cena_3d)
+        self.radio_cena_2d.toggled.connect(lambda on: on and self._set_cena("2d"))
+        self.radio_cena_3d.toggled.connect(lambda on: on and self._set_cena("3d"))
+        layout_cena.addWidget(self.radio_cena_2d)
+        layout_cena.addWidget(self.radio_cena_3d)
+        coluna_esq.addWidget(grupo_cena)
+
         # --- Grupo 1: Objetos 2D ---
         grupo_objetos = QGroupBox("Objetos 2D")
         layout_objetos = QVBoxLayout(grupo_objetos)
@@ -1586,6 +1601,11 @@ class MainWindow(QMainWindow):
         self._label_ks.setText(f"Ks: {self._slider_ks.value() / 100.0:.2f}")
         self._label_shine.setText(f"Shininess: {self._slider_shine.value()}")
 
+    def _set_cena(self, cena):
+        """Alterna entre a cena 2D e a 3D (os dois tipos nunca aparecem juntos)."""
+        self.canvas.cena_ativa = cena
+        self.canvas.update()
+
     def _set_modo_render(self, modo):
         """Define o modo de exibição 3D (arame/solido/phong) para todos os objetos 3D."""
         self.canvas.modo_render_3d = modo
@@ -1692,9 +1712,23 @@ class MainWindow(QMainWindow):
         esf_segs = arestas_de_triangulos(esf_tris)
         esfera = Objeto3D("Esfera", esf_segs, "#CCA0FF", triangulos=esf_tris)
 
-        for obj in (cubo, piramide, esfera):
+        # Superfície B-Spline de exemplo (domo), abaixo dos objetos — também
+        # é sombreada nos modos Sólido/Phong.
+        sx = [-220, -75, 75, 220]
+        sz = [-220, -75, 75, 220]
+        alt = [
+            [-150, -110, -110, -150],
+            [-110,  -30,  -30, -110],
+            [-110,  -30,  -30, -110],
+            [-150, -110, -110, -150],
+        ]
+        matriz_sup = [[Ponto3D(sx[j], alt[i][j], sz[i]) for j in range(4)]
+                      for i in range(4)]
+        superficie = SuperficieBSpline3D("Superficie", matriz_sup, "#00AAAA", passos=8)
+
+        for obj in (cubo, piramide, esfera, superficie):
             self.display_file.adicionar_objeto(obj)
-            item = QListWidgetItem(f"{obj.nome} [Objeto3D]")
+            item = QListWidgetItem(f"{obj.nome} [{obj.tipo}]")
             item.setData(Qt.ItemDataRole.UserRole, obj.nome)
             self.list_widget_3d.addItem(item)
 

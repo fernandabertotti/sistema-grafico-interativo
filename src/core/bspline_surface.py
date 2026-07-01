@@ -116,3 +116,60 @@ def polilinhas_para_segmentos(polilinhas):
 def gerar_segmentos_superficie_bspline(matriz_controle, passos=10):
     return polilinhas_para_segmentos(
         gerar_linhas_superficie_bspline(matriz_controle, passos))
+
+
+def _gerar_grade_patch(patch, passos):
+    """Gera a grade (passos+1)x(passos+1) de pontos 3D de um patch bicubico.
+
+    grade[u_idx][v_idx] é o ponto da superficie no parametro (u, v).
+    """
+    curvas_v = [gerar_pontos_segmento_bspline_3d(*patch[linha], passos)
+                for linha in range(4)]
+    grade = [[None] * (passos + 1) for _ in range(passos + 1)]
+    for v_idx in range(passos + 1):
+        controle_u = [curvas_v[linha][v_idx] for linha in range(4)]
+        curva_u = gerar_pontos_segmento_bspline_3d(*controle_u, passos)
+        for u_idx in range(passos + 1):
+            grade[u_idx][v_idx] = curva_u[u_idx]
+    return grade
+
+
+def gerar_triangulos_superficie_bspline(matriz_controle, passos=10):
+    """Gera os triangulos da superficie com normais por vertice (para Phong).
+
+    Retorna uma lista de dicts {'v': [(x,y,z)*3], 'n': [(nx,ny,nz)*3]}. As
+    normais sao estimadas por diferencas centrais na grade (suaves).
+    """
+    linhas_count, colunas_count = validar_matriz_controle(matriz_controle)
+    triangulos = []
+
+    for i in range(linhas_count - 3):
+        for j in range(colunas_count - 3):
+            patch = [linha[j:j + 4] for linha in matriz_controle[i:i + 4]]
+            grade = _gerar_grade_patch(patch, passos)
+
+            n_u = len(grade)
+            n_v = len(grade[0])
+            pts = np.array([[[p.x, p.y, p.z] for p in linha] for linha in grade])
+
+            # Normais por vertice: cross das tangentes (diferencas centrais).
+            normais = np.zeros_like(pts)
+            for a in range(n_u):
+                for b in range(n_v):
+                    du = pts[min(a + 1, n_u - 1), b] - pts[max(a - 1, 0), b]
+                    dv = pts[a, min(b + 1, n_v - 1)] - pts[a, max(b - 1, 0)]
+                    nrm = np.cross(du, dv)
+                    norma = np.linalg.norm(nrm)
+                    normais[a, b] = nrm / norma if norma > 1e-9 else (0.0, 0.0, 1.0)
+
+            # Dois triangulos por celula da grade.
+            for a in range(n_u - 1):
+                for b in range(n_v - 1):
+                    v00 = tuple(pts[a, b]);       n00 = tuple(normais[a, b])
+                    v10 = tuple(pts[a + 1, b]);   n10 = tuple(normais[a + 1, b])
+                    v11 = tuple(pts[a + 1, b + 1]); n11 = tuple(normais[a + 1, b + 1])
+                    v01 = tuple(pts[a, b + 1]);   n01 = tuple(normais[a, b + 1])
+                    triangulos.append({'v': [v00, v10, v11], 'n': [n00, n10, n11]})
+                    triangulos.append({'v': [v00, v11, v01], 'n': [n00, n11, n01]})
+
+    return triangulos

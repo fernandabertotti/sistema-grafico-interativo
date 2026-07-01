@@ -48,6 +48,11 @@ def calcular_phong(ponto_3d, normal, olho, luz: LuzPontual,
     v = _normalizar(np.array(olho, dtype=float) - p)  # direcao ate o observador
     ia = np.array(luz_ambiente, dtype=float)
 
+    # Iluminacao de dois lados: a normal aponta para o observador (superficies
+    # abertas ficam iluminadas de qualquer lado que estiver voltado para a camera).
+    if np.dot(n, v) < 0:
+        n = -n
+
     # Componente ambiente.
     cor = material.ka * ia
 
@@ -85,6 +90,10 @@ def calcular_phong_array(pontos, normais, olho, luz: LuzPontual,
     l = _normalizar_linhas(luz.posicao - p)
     v = _normalizar_linhas(np.asarray(olho, dtype=float) - p)
     ia = np.asarray(luz_ambiente, dtype=float)
+
+    # Iluminacao de dois lados: normal voltada para o observador.
+    inverter = (np.sum(n * v, axis=1) < 0)[:, None]
+    n = np.where(inverter, -n, n)
 
     n_dot_l = np.sum(n * l, axis=1)              # (M,)
     n_dot_l_pos = np.clip(n_dot_l, 0.0, None)

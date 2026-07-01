@@ -3,7 +3,10 @@ from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QPolygonF
 from PyQt6.QtCore import QPointF
 from src.utils.utils import VP_MARGIN, BEZIER_STEPS
 from src.core.bspline import gerar_pontos_bspline
-from src.core.bspline_surface import gerar_segmentos_superficie_bspline
+from src.core.bspline_surface import (
+    gerar_segmentos_superficie_bspline,
+    gerar_triangulos_superficie_bspline,
+)
 from src.core.clipping import (
     clip_ponto,
     clip_reta_cohen_sutherland,   # ou liang_barsky — escolha uma e use radio button na UI
@@ -34,6 +37,8 @@ class Canvas(QWidget):
         #   "solido" -> triangulos rasterizados + Z-buffer (framebuffer)
         #   "phong"  -> solido com iluminacao de Phong por pixel
         self.modo_render_3d = "arame"
+        # Cena ativa: "2d" ou "3d". Os dois tipos nunca aparecem juntos.
+        self.cena_ativa = "3d"
         self.usar_zbuffer = True        # checagem de profundidade nos triangulos
         self.framebuffer = Framebuffer(int(vp_width), int(vp_height))
         # Parametros de iluminacao (ajustaveis pela UI).
@@ -117,27 +122,40 @@ class Canvas(QWidget):
                          int(vp.xmax - vp.xmin), int(vp.ymax - vp.ymin))
 
         modo = self.modo_render_3d
+        cena = self.cena_ativa
 
         # ---- Passe 1: rasterização no framebuffer próprio ----
-        # Preenchimentos 2D (draw_polygon) + sólidos 3D (Z-buffer/Phong). O buffer
+        # 2D: preenchimentos via draw_polygon. 3D: faces sólidas/Phong. O buffer
         # é transparente onde nada foi pintado, para compor sobre o vetorial.
         fb = self.framebuffer
         fb.usar_zbuffer = self.usar_zbuffer
         fb.clear(transparente=True)
         desenhou_algo = False
-        for obj in self.display_file.objetos:
-            if obj.tipo == "Wireframe" and getattr(obj, "preenchido", False):
-                if self._preencher_wireframe_fb(obj):
-                    desenhou_algo = True
-            elif (obj.tipo == "Objeto3D" and getattr(obj, "triangulos", None)
-                  and modo in ("solido", "phong")):
-                self._rasterizar_objeto3d(obj, modo)
-                desenhou_algo = True
+        if cena == "2d":
+            for obj in self.display_file.objetos:
+                if obj.tipo == "Wireframe" and getattr(obj, "preenchido", False):
+                    if self._preencher_wireframe_fb(obj):
+                        desenhou_algo = True
+        elif modo in ("solido", "phong"):
+            for obj in self.display_file.objetos:
+                if obj.tipo in ("Objeto3D", "SuperficieBSpline3D"):
+                    tris = self._triangulos_do_objeto(obj)
+                    if tris:
+                        self._rasterizar_faces(tris, obj.cor, modo)
+                        desenhou_algo = True
         if desenhou_algo:
             painter.drawImage(QPointF(vp.xmin, vp.ymin), fb.to_qimage())
 
         # ---- Passe 2: desenho vetorial (traços) por cima ----
+        # A cena ativa filtra os tipos: 2D e 3D nunca aparecem juntos.
         for obj in self.display_file.objetos:
+            tipo_2d = obj.tipo in ("Ponto", "Reta", "Wireframe", "Curva2D", "BSpline2D")
+            tipo_3d = obj.tipo in ("Objeto3D", "SuperficieBSpline3D")
+            if cena == "2d" and not tipo_2d:
+                continue
+            if cena == "3d" and not tipo_3d:
+                continue
+
             pen = QPen(QColor(obj.cor), 3)
             painter.setPen(pen)
 
@@ -149,6 +167,8 @@ class Canvas(QWidget):
                 continue
 
             if obj.tipo == "SuperficieBSpline3D":
+                if modo in ("solido", "phong"):
+                    continue  # já rasterizada como sólido no framebuffer
                 segmentos = gerar_segmentos_superficie_bspline(
                     obj.matriz_controle, getattr(obj, "passos", 10))
                 self._desenhar_wireframe_3d(painter, segmentos)
@@ -306,11 +326,23 @@ class Canvas(QWidget):
                 painter.drawLine(int(vp1[0]), int(vp1[1]),
                                  int(vp2[0]), int(vp2[1]))
 
-    def _rasterizar_objeto3d(self, obj, modo):
-        """Rasteriza as faces de um Objeto3D no framebuffer (sólido ou Phong)."""
-        cor = self._cor_rgb(obj.cor)
+    def _triangulos_do_objeto(self, obj):
+        """Retorna os triângulos (com normais) de um objeto 3D, ou None.
+
+        Objeto3D já traz `triangulos`; a superfície B-Spline gera a malha na hora.
+        """
+        if obj.tipo == "Objeto3D":
+            return obj.triangulos
+        if obj.tipo == "SuperficieBSpline3D":
+            return gerar_triangulos_superficie_bspline(
+                obj.matriz_controle, getattr(obj, "passos", 10))
+        return None
+
+    def _rasterizar_faces(self, triangulos, cor_hex, modo):
+        """Rasteriza uma lista de triângulos no framebuffer (sólido ou Phong)."""
+        cor = self._cor_rgb(cor_hex)
         olho = self._posicao_olho()
-        for tri in obj.triangulos:
+        for tri in triangulos:
             vw0, vw1, vw2 = tri['v']
             n0, n1, n2 = tri['n']
             f0 = self._mundo_para_fb(vw0)
