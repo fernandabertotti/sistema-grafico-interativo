@@ -1532,7 +1532,7 @@ class MainWindow(QMainWindow):
 
     def _criar_grupo_shading(self):
         """Monta o grupo de controles de exibição 3D e iluminação de Phong."""
-        grupo = QGroupBox("Exibição 3D (Rasterização)")
+        grupo = QGroupBox("Exibição 3D")
         layout = QVBoxLayout(grupo)
 
         # Modo de exibição dos objetos 3D (aplicado a todos de uma vez).
@@ -1760,6 +1760,24 @@ class MainWindow(QMainWindow):
             item = QListWidgetItem(f"{obj.nome} [{obj.tipo}]")
             item.setData(Qt.ItemDataRole.UserRole, obj.nome)
             self.list_widget_3d.addItem(item)
+
+        # --- Objetos 2D de exemplo (aparecem ao selecionar a Cena 2D) ---
+        objetos_2d = [
+            Ponto("Ponto", [(-320, 220)], "#000000"),
+            Reta("Reta", [(-370, 250), (-170, 120)], "#FF0000"),
+            Wireframe("Quadrado", [(-360, -250), (-210, -250),
+                                   (-210, -100), (-360, -100)],
+                      "#0000FF", preenchido=True),
+            Wireframe("Triangulo", [(-80, -250), (120, -250), (20, -80)], "#00AA00"),
+            Curva2D("Bezier", [(60, 60), (140, 250), (280, -80), (370, 120)], "#FF00FF"),
+            BSpline2D("BSpline", [(60, -250), (150, -90), (240, -250),
+                                  (330, -90), (380, -190)], "#FFA500"),
+        ]
+        for obj in objetos_2d:
+            self.display_file.adicionar_objeto(obj)
+            self.list_widget.addItem(f"{obj.nome} [{obj.tipo}]")
+            item = self.list_widget.item(self.list_widget.count() - 1)
+            item.setData(Qt.ItemDataRole.UserRole, obj.nome)
 
         # Câmera inicial em ângulo (isométrico) para revelar o volume 3D
         # dos objetos ao ativar os modos Sólido/Phong.
