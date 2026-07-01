@@ -11,6 +11,8 @@ from src.core.clipping import (
     clip_poligono_sutherland_hodgman,
 )
 from src.core.bezier import gerar_pontos_curva
+from src.core.framebuffer import Framebuffer
+from src.core.phong import LuzPontual, MaterialPhong
 
 class Canvas(QWidget):
     def __init__(self, display_file, window, viewport, window3d):
@@ -26,11 +28,30 @@ class Canvas(QWidget):
         vp_height = self.viewport.ymax - self.viewport.ymin
         # Calcula a proporção da viewport
         self.viewport_aspect = vp_width / vp_height if vp_height != 0 else 1.0
+
+        # --- Rasterizacao / Shading (Trabalhos 2.1, 2.2 e 2.3) ---
+        self.modo_framebuffer = False   # ativa render via Framebuffer
+        self.usar_zbuffer = True        # checagem de profundidade nos triangulos
+        self.usar_phong = True          # shading de Phong por pixel
+        self.framebuffer = Framebuffer(int(vp_width), int(vp_height))
+        # Parametros de iluminacao (ajustaveis pela UI).
+        self.luz = LuzPontual([200.0, 200.0, 300.0], (1.0, 1.0, 1.0))
+        self.material = MaterialPhong()
+        self.luz_ambiente = (0.2, 0.2, 0.2)
+
         self.setStyleSheet("background-color: white; border: 1px solid black;")
 
     def resizeEvent(self, event):
         self._sync_viewport_to_canvas_center()
+        self._criar_framebuffer()
         super().resizeEvent(event)
+
+    def _criar_framebuffer(self):
+        """Recria o framebuffer com as dimensoes atuais da viewport."""
+        largura = int(self.viewport.xmax - self.viewport.xmin)
+        altura = int(self.viewport.ymax - self.viewport.ymin)
+        if largura > 0 and altura > 0:
+            self.framebuffer = Framebuffer(largura, altura)
 
     def _sync_viewport_to_canvas_center(self):
         """Ajusta a viewport para manter o conteúdo centralizado e com a proporção correta."""
@@ -86,11 +107,19 @@ class Canvas(QWidget):
         painter.drawRect(int(vp.xmin), int(vp.ymin),
                          int(vp.xmax - vp.xmin), int(vp.ymax - vp.ymin))
 
+        # No modo framebuffer, limpa o buffer proprio antes de rasterizar 3D.
+        if self.modo_framebuffer:
+            self.framebuffer.usar_zbuffer = self.usar_zbuffer
+            self.framebuffer.clear()
+
         for obj in self.display_file.objetos:
             pen = QPen(QColor(obj.cor), 3)
             painter.setPen(pen)
 
             if obj.tipo == "Objeto3D":
+                if self.modo_framebuffer:
+                    self._desenhar_objeto3d_framebuffer(obj)
+                    continue
                 fn_clip = (clip_reta_cohen_sutherland
                            if self.algoritmo_clip_reta == "CS"
                            else clip_reta_liang_barsky)
@@ -109,6 +138,11 @@ class Canvas(QWidget):
                         vp2 = self.viewport.viewport_transform_scn(resultado[1])
                         painter.drawLine(int(vp1[0]), int(vp1[1]),
                                          int(vp2[0]), int(vp2[1]))
+                continue
+
+            if obj.tipo == "Objeto3DPhong":
+                if self.modo_framebuffer:
+                    self._desenhar_phong_framebuffer(obj)
                 continue
 
             if obj.tipo == "SuperficieBSpline3D":
@@ -212,3 +246,52 @@ class Canvas(QWidget):
                         anterior_vp = (x, y)
                     else:
                         anterior_vp = None
+
+        # Exibe o framebuffer (com o 3D rasterizado) sobre a viewport.
+        if self.modo_framebuffer:
+            painter.drawImage(QPointF(self.viewport.xmin, self.viewport.ymin),
+                              self.framebuffer.to_qimage())
+
+    # ------------------------------------------------------------------
+    # Rasterizacao 3D via Framebuffer (Trabalhos 2.1, 2.2 e 2.3)
+    # ------------------------------------------------------------------
+    def _cor_rgb(self, cor_hex):
+        """Converte '#RRGGBB' em tupla (r, g, b) de inteiros."""
+        c = QColor(cor_hex)
+        return (c.red(), c.green(), c.blue())
+
+    def _mundo_para_fb(self, ponto_mundo):
+        """Projeta um ponto do mundo para (x_fb, y_fb, z_view) no framebuffer."""
+        x_scn, y_scn, z_view = self.window3d.generate_scn_3d_with_z(ponto_mundo)
+        x_vp, y_vp = self.viewport.viewport_transform_scn((x_scn, y_scn))
+        # Coordenadas locais ao framebuffer (origem no canto da viewport).
+        return (x_vp - self.viewport.xmin, y_vp - self.viewport.ymin, z_view)
+
+    def _desenhar_objeto3d_framebuffer(self, obj):
+        """Rasteriza um Objeto3D (wireframe) no framebuffer com Bresenham."""
+        cor = self._cor_rgb(obj.cor)
+        for p1, p2 in obj.segmentos:
+            x1, y1, _ = self._mundo_para_fb((p1.x, p1.y, p1.z))
+            x2, y2, _ = self._mundo_para_fb((p2.x, p2.y, p2.z))
+            self.framebuffer.draw_line(x1, y1, x2, y2, cor)
+
+    def _desenhar_phong_framebuffer(self, obj):
+        """Rasteriza um Objeto3DPhong no framebuffer (Phong por pixel ou cor plana)."""
+        cor_plana = self._cor_rgb(obj.cor)
+        olho = tuple(self.window3d.vrp)
+        for tri in obj.triangulos:
+            (vw0, vw1, vw2) = tri['v']
+            (n0, n1, n2) = tri['n']
+            f0 = self._mundo_para_fb(vw0)
+            f1 = self._mundo_para_fb(vw1)
+            f2 = self._mundo_para_fb(vw2)
+            if self.usar_phong:
+                # Vertice completo: (x_fb, y_fb, z_view, x_world, y_world, z_world)
+                v0 = (f0[0], f0[1], f0[2], vw0[0], vw0[1], vw0[2])
+                v1 = (f1[0], f1[1], f1[2], vw1[0], vw1[1], vw1[2])
+                v2 = (f2[0], f2[1], f2[2], vw2[0], vw2[1], vw2[2])
+                self.framebuffer.draw_triangle_phong(
+                    v0, v1, v2, n0, n1, n2,
+                    self.material, self.luz, olho, self.luz_ambiente)
+            else:
+                self.framebuffer.draw_triangle_3d(f0, f1, f2, cor_plana)

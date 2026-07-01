@@ -112,6 +112,10 @@ def salvar_obj(filepath, display_file):
 
     offset = 0
     for obj in display_file.obter_todos():
+        # Objeto3DPhong (malha de triangulos + normais) nao tem formato .obj
+        # neste sistema; e regenerado pelo botao "Carregar PowerGirl".
+        if getattr(obj, "tipo", None) == "Objeto3DPhong":
+            continue
         obj_linhas, num_v = DescritorOBJ.objeto_para_obj(obj, offset)
         linhas.extend(obj_linhas)
         linhas.append("")

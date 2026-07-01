@@ -58,6 +58,26 @@ class Window3D:
         half_v = (self.vmax - self.vmin) / 2.0
         return (x_vc / half_u, y_vc / half_v)
 
+    def generate_scn_3d_with_z(self, ponto_mundo):
+        """Retorna (x_scn, y_scn, z_view) para projecao paralela.
+
+        z_view e a profundidade na camera (projecao do ponto sobre a VPN,
+        antes de qualquer divisao perspectiva). Serve para interpolacao de Z
+        correta no framebuffer/Z-buffer.
+        """
+        x, y, z = ponto_mundo
+        u, v, n = self._axes()
+        vrp = np.array(self.vrp, dtype=float)
+
+        p = np.array([x, y, z], dtype=float) - vrp
+        x_vc = float(np.dot(p, u))
+        y_vc = float(np.dot(p, v))
+        z_vc = float(np.dot(p, n))  # profundidade na direcao de visao
+
+        half_u = (self.umax - self.umin) / 2.0
+        half_v = (self.vmax - self.vmin) / 2.0
+        return (x_vc / half_u, y_vc / half_v, z_vc)
+
     def generate_scn_3d_perspective(self, ponto_mundo, d: float = 500.0):
         x, y, z = ponto_mundo
         u_ax, v_ax, n_ax = self._axes()

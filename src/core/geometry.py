@@ -50,6 +50,15 @@ class Objeto3D:
         self.cor = cor
 
 
+class Objeto3DPhong:
+    """Objeto 3D com triangulos e normais por vertice para iluminacao de Phong."""
+    def __init__(self, nome, triangulos, cor="#888888"):
+        self.nome = nome
+        self.triangulos = triangulos  # list[dict] com 'v' e 'n'
+        self.tipo = "Objeto3DPhong"
+        self.cor = cor
+
+
 class SuperficieBSpline3D:
     """Superficie bicubica B-Spline uniforme definida por matriz de pontos 3D."""
     def __init__(self, nome: str, matriz_controle: List[List[Ponto3D]], cor: str = "#000000", passos: int = 10):

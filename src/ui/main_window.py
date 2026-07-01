@@ -8,8 +8,9 @@ from PyQt6.QtCore import Qt
 from src.ui.canvas import Canvas
 from src.core.geometry import (
     Ponto, Reta, Wireframe, Curva2D, BSpline2D, Ponto3D, Objeto3D,
-    SuperficieBSpline3D,
+    SuperficieBSpline3D, Objeto3DPhong,
 )
+from src.core.powergirl_model import get_powergirl_triangles
 from src.core.transform3d import Transform3D as Transform3D3D
 from src.core.window3d import Window3D
 from src.core.transform import Transform
@@ -1040,6 +1041,9 @@ class MainWindow(QMainWindow):
         layout_persp.addWidget(self._label_modo_persp)
 
         painel_layout.addWidget(grupo_persp)
+
+        # --- Grupo: Rasterização / Shading ---
+        painel_layout.addWidget(self._criar_grupo_shading())
         painel_layout.addStretch()
 
         # DIREITA: Canvas (Viewport)
@@ -1489,6 +1493,136 @@ class MainWindow(QMainWindow):
         self._slider_focal.setValue(novo_d)
         self._label_d_valor.setText(str(novo_d))
         self._atualizar_label_modo()
+        self.canvas.update()
+
+    # --- Rasterização / Shading (Trabalhos 2.1, 2.2 e 2.3) ---
+
+    def _criar_grupo_shading(self):
+        """Monta o grupo de controles de rasterização e iluminação de Phong."""
+        grupo = QGroupBox("Rasterização / Shading")
+        layout = QVBoxLayout(grupo)
+
+        # Toggles principais
+        self.check_framebuffer = QCheckBox("Usar Framebuffer")
+        self.check_framebuffer.toggled.connect(self._toggle_framebuffer)
+        layout.addWidget(self.check_framebuffer)
+
+        self.check_zbuffer = QCheckBox("Usar Z-buffer")
+        self.check_zbuffer.setChecked(True)
+        self.check_zbuffer.toggled.connect(self._toggle_zbuffer)
+        layout.addWidget(self.check_zbuffer)
+
+        self.check_phong = QCheckBox("Iluminação de Phong")
+        self.check_phong.setChecked(True)
+        self.check_phong.toggled.connect(self._toggle_phong)
+        layout.addWidget(self.check_phong)
+
+        btn_powergirl = QPushButton("Carregar PowerGirl")
+        btn_powergirl.clicked.connect(self._carregar_powergirl)
+        layout.addWidget(btn_powergirl)
+
+        # Posição da luz (Lx, Ly, Lz) — valores iniciais iguais aos padrões do Canvas
+        layout.addWidget(QLabel("Posição da luz (Lx, Ly, Lz):"))
+        linha_luz = QHBoxLayout()
+        self.input_lx = QLineEdit("200"); self.input_lx.setFixedWidth(55)
+        self.input_ly = QLineEdit("200"); self.input_ly.setFixedWidth(55)
+        self.input_lz = QLineEdit("300"); self.input_lz.setFixedWidth(55)
+        for inp in (self.input_lx, self.input_ly, self.input_lz):
+            inp.editingFinished.connect(self._atualizar_luz)
+            linha_luz.addWidget(inp)
+        linha_luz.addStretch()
+        layout.addLayout(linha_luz)
+
+        # Coeficientes de material (Ka, Kd, Ks) e Shininess via sliders
+        self._label_ka = QLabel()
+        self._slider_ka = self._criar_slider_coef(0, 100, 10, self._atualizar_material)
+        layout.addWidget(self._label_ka)
+        layout.addWidget(self._slider_ka)
+
+        self._label_kd = QLabel()
+        self._slider_kd = self._criar_slider_coef(0, 100, 70, self._atualizar_material)
+        layout.addWidget(self._label_kd)
+        layout.addWidget(self._slider_kd)
+
+        self._label_ks = QLabel()
+        self._slider_ks = self._criar_slider_coef(0, 100, 50, self._atualizar_material)
+        layout.addWidget(self._label_ks)
+        layout.addWidget(self._slider_ks)
+
+        self._label_shine = QLabel()
+        self._slider_shine = self._criar_slider_coef(1, 128, 32, self._atualizar_material)
+        layout.addWidget(self._label_shine)
+        layout.addWidget(self._slider_shine)
+
+        self._atualizar_labels_material()
+        return grupo
+
+    def _criar_slider_coef(self, minimo, maximo, valor, callback):
+        slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setMinimum(minimo)
+        slider.setMaximum(maximo)
+        slider.setValue(valor)
+        slider.valueChanged.connect(callback)
+        return slider
+
+    def _atualizar_labels_material(self):
+        self._label_ka.setText(f"Ka: {self._slider_ka.value() / 100.0:.2f}")
+        self._label_kd.setText(f"Kd: {self._slider_kd.value() / 100.0:.2f}")
+        self._label_ks.setText(f"Ks: {self._slider_ks.value() / 100.0:.2f}")
+        self._label_shine.setText(f"Shininess: {self._slider_shine.value()}")
+
+    def _toggle_framebuffer(self, checked):
+        self.canvas.modo_framebuffer = checked
+        self.canvas.update()
+
+    def _toggle_zbuffer(self, checked):
+        self.canvas.usar_zbuffer = checked
+        self.canvas.update()
+
+    def _toggle_phong(self, checked):
+        self.canvas.usar_phong = checked
+        self.canvas.update()
+
+    def _atualizar_luz(self):
+        try:
+            lx = float(self.input_lx.text())
+            ly = float(self.input_ly.text())
+            lz = float(self.input_lz.text())
+        except ValueError:
+            return
+        self.canvas.luz.posicao[:] = [lx, ly, lz]
+        self.canvas.update()
+
+    def _atualizar_material(self):
+        ka = self._slider_ka.value() / 100.0
+        kd = self._slider_kd.value() / 100.0
+        ks = self._slider_ks.value() / 100.0
+        shine = float(self._slider_shine.value())
+        self.canvas.material.ka[:] = [ka, ka, ka]
+        self.canvas.material.kd[:] = [kd, kd, kd]
+        self.canvas.material.ks[:] = [ks, ks, ks]
+        self.canvas.material.shininess = shine
+        self._atualizar_labels_material()
+        self.canvas.update()
+
+    def _carregar_powergirl(self):
+        """Carrega o modelo PowerGirl (esfera procedural) como Objeto3DPhong."""
+        nome_base = "PowerGirl"
+        nomes = [o.nome for o in self.display_file.obter_todos()]
+        nome = nome_base
+        contador = 1
+        while nome in nomes:
+            nome = f"{nome_base}_{contador}"
+            contador += 1
+        triangulos = get_powergirl_triangles()
+        obj = Objeto3DPhong(nome, triangulos, "#CCA0FF")
+        self.display_file.adicionar_objeto(obj)
+        item = QListWidgetItem(f"{nome} [Objeto3DPhong]")
+        item.setData(Qt.ItemDataRole.UserRole, nome)
+        self.list_widget_3d.addItem(item)
+        # Garante que o framebuffer esteja ativo para visualizar o modelo.
+        if not self.check_framebuffer.isChecked():
+            self.check_framebuffer.setChecked(True)
         self.canvas.update()
 
     def keyPressEvent(self, event):
