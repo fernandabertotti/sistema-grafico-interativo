@@ -64,3 +64,38 @@ def calcular_phong(ponto_3d, normal, olho, luz: LuzPontual,
 
     cor = np.clip(cor, 0.0, 1.0)
     return (float(cor[0]), float(cor[1]), float(cor[2]))
+
+
+def _normalizar_linhas(m):
+    """Normaliza cada linha de uma matriz (M, 3)."""
+    normas = np.linalg.norm(m, axis=1, keepdims=True)
+    return m / np.clip(normas, 1e-12, None)
+
+
+def calcular_phong_array(pontos, normais, olho, luz: LuzPontual,
+                         material: MaterialPhong,
+                         luz_ambiente=(0.2, 0.2, 0.2)):
+    """Versão vetorizada de `calcular_phong` para vários pontos de uma vez.
+
+    `pontos` e `normais` são arrays (M, 3). Retorna cores (M, 3) em [0,1].
+    Usada pelo rasterizador para calcular Phong por pixel de forma eficiente.
+    """
+    p = np.asarray(pontos, dtype=float)
+    n = _normalizar_linhas(np.asarray(normais, dtype=float))
+    l = _normalizar_linhas(luz.posicao - p)
+    v = _normalizar_linhas(np.asarray(olho, dtype=float) - p)
+    ia = np.asarray(luz_ambiente, dtype=float)
+
+    n_dot_l = np.sum(n * l, axis=1)              # (M,)
+    n_dot_l_pos = np.clip(n_dot_l, 0.0, None)
+
+    # Ambiente + difusa
+    cor = material.ka * ia + material.kd * n_dot_l_pos[:, None] * luz.intensidade
+
+    # Especular (só onde a face está voltada para a luz)
+    r = _normalizar_linhas(2.0 * n_dot_l[:, None] * n - l)
+    r_dot_v = np.clip(np.sum(r * v, axis=1), 0.0, None)
+    fator_spec = (r_dot_v ** material.shininess)[:, None] * (n_dot_l > 0)[:, None]
+    cor = cor + material.ks * fator_spec * luz.intensidade
+
+    return np.clip(cor, 0.0, 1.0)

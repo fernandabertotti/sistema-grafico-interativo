@@ -9,7 +9,7 @@ Z-buffer e triangulos com iluminacao de Phong por pixel.
 import numpy as np
 from PyQt6.QtGui import QImage
 
-from src.core.phong import calcular_phong
+from src.core.phong import calcular_phong, calcular_phong_array
 
 
 class Framebuffer:
@@ -141,65 +141,48 @@ class Framebuffer:
                     self.draw_pixel(x, y, color)
 
     # ------------------------------------------------------------------
-    # Rasterizador generico de triangulo com interpolacao de atributos
+    # Rasterizador vetorizado de triangulo (barycentric por bounding box)
     # ------------------------------------------------------------------
-    def _rasterizar_triangulo(self, p0, p1, p2, pixel_fn):
-        """Varre um triangulo por scan-line interpolando atributos linearmente.
+    def _preparar_raster(self, x0, y0, x1, y1, x2, y2):
+        """Prepara a rasterizacao vetorizada de um triangulo.
 
-        Cada p_i e a tupla (x, y, atributos) onde `atributos` e um np.array.
-        Para cada pixel interno chama pixel_fn(x_int, y_int, atributos_interp).
+        Retorna (minx, miny, maxx, maxy, w0, w1, w2, dentro) onde w0/w1/w2 sao
+        as coordenadas baricentricas de cada pixel da bounding box e `dentro` e
+        a mascara booleana dos pixels internos ao triangulo. Retorna None se o
+        triangulo estiver fora da tela ou for degenerado.
         """
-        # Ordena os vertices por Y (A no topo, C na base).
-        a, b, c = sorted([p0, p1, p2], key=lambda p: p[1])
-        ya, yb, yc = a[1], b[1], c[1]
+        minx = max(0, int(np.floor(min(x0, x1, x2))))
+        maxx = min(self.width - 1, int(np.ceil(max(x0, x1, x2))))
+        miny = max(0, int(np.floor(min(y0, y1, y2))))
+        maxy = min(self.height - 1, int(np.ceil(max(y0, y1, y2))))
+        if minx > maxx or miny > maxy:
+            return None
 
-        def interp_aresta(y, topo, base):
-            """Interpola (x, atributos) na altura y ao longo de topo->base."""
-            x_t, y_t, at_t = topo
-            x_b, y_b, at_b = base
-            if y_b == y_t:
-                t = 0.0
-            else:
-                t = (y - y_t) / (y_b - y_t)
-            x = x_t + (x_b - x_t) * t
-            at = at_t + (at_b - at_t) * t
-            return x, at
+        denom = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
+        if abs(denom) < 1e-9:
+            return None
 
-        y_ini = int(np.ceil(ya))
-        y_fim = int(np.floor(yc))
-        for y in range(y_ini, y_fim + 1):
-            if y < 0 or y >= self.height:
-                continue
-            # Aresta longa A->C sempre presente.
-            x_long, at_long = interp_aresta(y, a, c)
-            # Aresta curta: A->B na parte de cima, B->C na parte de baixo.
-            if y < yb:
-                x_curt, at_curt = interp_aresta(y, a, b)
-            else:
-                x_curt, at_curt = interp_aresta(y, b, c)
+        xs = np.arange(minx, maxx + 1)
+        ys = np.arange(miny, maxy + 1)
+        gx, gy = np.meshgrid(xs, ys)  # (H, W)
 
-            # Ordena esquerda/direita.
-            x_esq, at_esq = x_long, at_long
-            x_dir, at_dir = x_curt, at_curt
-            if x_esq > x_dir:
-                x_esq, x_dir = x_dir, x_esq
-                at_esq, at_dir = at_dir, at_esq
+        w0 = ((y1 - y2) * (gx - x2) + (x2 - x1) * (gy - y2)) / denom
+        w1 = ((y2 - y0) * (gx - x2) + (x0 - x2) * (gy - y2)) / denom
+        w2 = 1.0 - w0 - w1
+        dentro = (w0 >= 0) & (w1 >= 0) & (w2 >= 0)
+        return minx, miny, maxx, maxy, w0, w1, w2, dentro
 
-            largura = x_dir - x_esq
-            x_ini = int(np.ceil(x_esq))
-            x_fim = int(np.floor(x_dir))
-            for x in range(x_ini, x_fim + 1):
-                if x < 0 or x >= self.width:
-                    continue
-                if largura <= 1e-9:
-                    t = 0.0
-                else:
-                    t = (x - x_esq) / largura
-                atributos = at_esq + (at_dir - at_esq) * t
-                pixel_fn(x, y, atributos)
+    def _mascara_profundidade(self, z, dentro, miny, maxy, minx, maxx):
+        """Combina a mascara interna com o teste de Z-buffer e retorna a fatia."""
+        sub_z = self.zbuffer[miny:maxy + 1, minx:maxx + 1]
+        if self.usar_zbuffer:
+            passa = dentro & (z < sub_z)
+        else:
+            passa = dentro
+        return passa, sub_z
 
     # ------------------------------------------------------------------
-    # Trabalho 2.2 - Triangulo com Z-buffer
+    # Trabalho 2.2 - Triangulo com Z-buffer (cor plana)
     # ------------------------------------------------------------------
     def draw_triangle_3d(self, v0, v1, v2, color=(0, 0, 0)):
         """Rasteriza um triangulo com interpolacao linear de Z e Z-buffer.
@@ -207,43 +190,61 @@ class Framebuffer:
         v0/v1/v2 = (x_vp, y_vp, z_view), coordenadas ja em espaco de viewport
         (XY em pixels) e Z em espaco de camera.
         """
-        def pixel_fn(x, y, atributos):
-            self.draw_pixel_depth(x, y, atributos[0], color)
+        prep = self._preparar_raster(v0[0], v0[1], v1[0], v1[1], v2[0], v2[1])
+        if prep is None:
+            return
+        minx, miny, maxx, maxy, w0, w1, w2, dentro = prep
 
-        p0 = (v0[0], v0[1], np.array([v0[2]], dtype=float))
-        p1 = (v1[0], v1[1], np.array([v1[2]], dtype=float))
-        p2 = (v2[0], v2[1], np.array([v2[2]], dtype=float))
-        self._rasterizar_triangulo(p0, p1, p2, pixel_fn)
+        z = w0 * v0[2] + w1 * v1[2] + w2 * v2[2]
+        passa, sub_z = self._mascara_profundidade(z, dentro, miny, maxy, minx, maxx)
+        sub_b = self.buffer[miny:maxy + 1, minx:maxx + 1]
+
+        sub_z[passa] = z[passa]
+        sub_b[passa] = np.array([int(color[0]), int(color[1]), int(color[2])],
+                                dtype=np.uint8)
 
     # ------------------------------------------------------------------
     # Trabalho 2.3 - Triangulo com iluminacao de Phong por pixel
     # ------------------------------------------------------------------
     def draw_triangle_phong(self, v0, v1, v2, n0, n1, n2,
                             material, luz, olho, luz_ambiente):
-        """Rasteriza um triangulo calculando Phong por pixel.
+        """Rasteriza um triangulo calculando Phong por pixel (vetorizado).
 
-        Interpola posicao no mundo, profundidade e a normal por vertice; para
-        cada pixel calcula a cor com o modelo de Phong e aplica o Z-buffer.
+        Interpola posicao no mundo, profundidade e a normal por vertice; calcula
+        a cor de Phong para todos os pixels validos de uma vez e aplica Z-buffer.
 
         v0/v1/v2 = (x_vp, y_vp, z_view, x_world, y_world, z_world)
         n0/n1/n2 = normais por vertice (mesmo espaco de `olho`/`luz`).
         """
-        def montar(v, nrm):
-            # atributos = [z_view, xw, yw, zw, nx, ny, nz]
-            at = np.array([v[2], v[3], v[4], v[5],
-                           nrm[0], nrm[1], nrm[2]], dtype=float)
-            return (v[0], v[1], at)
+        prep = self._preparar_raster(v0[0], v0[1], v1[0], v1[1], v2[0], v2[1])
+        if prep is None:
+            return
+        minx, miny, maxx, maxy, w0, w1, w2, dentro = prep
 
-        def pixel_fn(x, y, atributos):
-            z_view = atributos[0]
-            ponto = (atributos[1], atributos[2], atributos[3])
-            normal = (atributos[4], atributos[5], atributos[6])
-            cor = calcular_phong(ponto, normal, olho, luz, material, luz_ambiente)
-            cor255 = (int(cor[0] * 255), int(cor[1] * 255), int(cor[2] * 255))
-            self.draw_pixel_depth(x, y, z_view, cor255)
+        z = w0 * v0[2] + w1 * v1[2] + w2 * v2[2]
+        passa, sub_z = self._mascara_profundidade(z, dentro, miny, maxy, minx, maxx)
+        if not passa.any():
+            return
+        sub_b = self.buffer[miny:maxy + 1, minx:maxx + 1]
 
-        self._rasterizar_triangulo(montar(v0, n0), montar(v1, n1),
-                                   montar(v2, n2), pixel_fn)
+        # Pesos baricentricos apenas dos pixels que passam.
+        b0 = w0[passa]; b1 = w1[passa]; b2 = w2[passa]
+
+        # Interpola posicao no mundo e normal por pixel.
+        px = b0 * v0[3] + b1 * v1[3] + b2 * v2[3]
+        py = b0 * v0[4] + b1 * v1[4] + b2 * v2[4]
+        pz = b0 * v0[5] + b1 * v1[5] + b2 * v2[5]
+        nx = b0 * n0[0] + b1 * n1[0] + b2 * n2[0]
+        ny = b0 * n0[1] + b1 * n1[1] + b2 * n2[1]
+        nz = b0 * n0[2] + b1 * n1[2] + b2 * n2[2]
+
+        pontos = np.stack([px, py, pz], axis=1)
+        normais = np.stack([nx, ny, nz], axis=1)
+        cores = calcular_phong_array(pontos, normais, olho, luz,
+                                     material, luz_ambiente)
+
+        sub_z[passa] = z[passa]
+        sub_b[passa] = (cores * 255).astype(np.uint8)
 
     # ------------------------------------------------------------------
     # Exibicao

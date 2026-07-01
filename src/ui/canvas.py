@@ -29,13 +29,15 @@ class Canvas(QWidget):
         # Calcula a proporção da viewport
         self.viewport_aspect = vp_width / vp_height if vp_height != 0 else 1.0
 
-        # --- Rasterizacao / Shading (Trabalhos 2.1, 2.2 e 2.3) ---
-        self.modo_framebuffer = False   # ativa render via Framebuffer
+        # --- Modo de exibicao dos objetos 3D (Trabalhos 2.1, 2.2 e 2.3) ---
+        #   "arame"  -> wireframe vetorial (QPainter)
+        #   "solido" -> triangulos rasterizados + Z-buffer (framebuffer)
+        #   "phong"  -> solido com iluminacao de Phong por pixel
+        self.modo_render_3d = "arame"
         self.usar_zbuffer = True        # checagem de profundidade nos triangulos
-        self.usar_phong = True          # shading de Phong por pixel
         self.framebuffer = Framebuffer(int(vp_width), int(vp_height))
         # Parametros de iluminacao (ajustaveis pela UI).
-        self.luz = LuzPontual([200.0, 200.0, 300.0], (1.0, 1.0, 1.0))
+        self.luz = LuzPontual([200.0, 200.0, -300.0], (1.0, 1.0, 1.0))
         self.material = MaterialPhong()
         self.luz_ambiente = (0.2, 0.2, 0.2)
 
@@ -96,7 +98,14 @@ class Canvas(QWidget):
         return self.viewport.viewport_transform_scn(ponto_scn)
 
     def paintEvent(self, event):
-        """Desenha todos os objetos do Display File."""
+        """Desenha todos os objetos do Display File.
+
+        Dois passes:
+          1) Objetos 3D com faces em modo Sólido/Phong -> rasterizados no
+             framebuffer e exibidos como imagem.
+          2) Desenho vetorial (QPainter): objetos 2D e objetos 3D em Arame
+             (ou 3D sem faces). O vetorial vem por cima do framebuffer.
+        """
         painter = QPainter(self)
 
         # Desenha a moldura vermelha da viewport
@@ -107,65 +116,37 @@ class Canvas(QWidget):
         painter.drawRect(int(vp.xmin), int(vp.ymin),
                          int(vp.xmax - vp.xmin), int(vp.ymax - vp.ymin))
 
-        # No modo framebuffer, limpa o buffer proprio antes de rasterizar 3D.
-        if self.modo_framebuffer:
-            self.framebuffer.usar_zbuffer = self.usar_zbuffer
-            self.framebuffer.clear()
+        modo = self.modo_render_3d
 
+        # ---- Passe 1: 3D sólido/Phong no framebuffer ----
+        if modo in ("solido", "phong"):
+            fb = self.framebuffer
+            fb.usar_zbuffer = self.usar_zbuffer
+            fb.clear()
+            desenhou_algo = False
+            for obj in self.display_file.objetos:
+                if obj.tipo == "Objeto3D" and getattr(obj, "triangulos", None):
+                    self._rasterizar_objeto3d(obj, modo)
+                    desenhou_algo = True
+            if desenhou_algo:
+                painter.drawImage(QPointF(vp.xmin, vp.ymin), fb.to_qimage())
+
+        # ---- Passe 2: desenho vetorial (2D + 3D arame) ----
         for obj in self.display_file.objetos:
             pen = QPen(QColor(obj.cor), 3)
             painter.setPen(pen)
 
             if obj.tipo == "Objeto3D":
-                if self.modo_framebuffer:
-                    self._desenhar_objeto3d_framebuffer(obj)
+                # Se já foi rasterizado como sólido, não redesenha em arame.
+                if modo in ("solido", "phong") and getattr(obj, "triangulos", None):
                     continue
-                fn_clip = (clip_reta_cohen_sutherland
-                           if self.algoritmo_clip_reta == "CS"
-                           else clip_reta_liang_barsky)
-                for p1, p2 in obj.segmentos:
-                    if self.modo_perspectiva:
-                        scn1 = self.window3d.generate_scn_3d_perspective(
-                            (p1.x, p1.y, p1.z), self.distancia_focal)
-                        scn2 = self.window3d.generate_scn_3d_perspective(
-                            (p2.x, p2.y, p2.z), self.distancia_focal)
-                    else:
-                        scn1 = self.window3d.generate_scn_3d((p1.x, p1.y, p1.z))
-                        scn2 = self.window3d.generate_scn_3d((p2.x, p2.y, p2.z))
-                    resultado = fn_clip(scn1, scn2)
-                    if resultado:
-                        vp1 = self.viewport.viewport_transform_scn(resultado[0])
-                        vp2 = self.viewport.viewport_transform_scn(resultado[1])
-                        painter.drawLine(int(vp1[0]), int(vp1[1]),
-                                         int(vp2[0]), int(vp2[1]))
-                continue
-
-            if obj.tipo == "Objeto3DPhong":
-                if self.modo_framebuffer:
-                    self._desenhar_phong_framebuffer(obj)
+                self._desenhar_wireframe_3d(painter, obj.segmentos)
                 continue
 
             if obj.tipo == "SuperficieBSpline3D":
-                fn_clip = (clip_reta_cohen_sutherland
-                           if self.algoritmo_clip_reta == "CS"
-                           else clip_reta_liang_barsky)
                 segmentos = gerar_segmentos_superficie_bspline(
                     obj.matriz_controle, getattr(obj, "passos", 10))
-                for p1, p2 in segmentos:
-                    if self.modo_perspectiva:
-                        scn1 = self.window3d.generate_scn_3d_perspective(
-                            (p1.x, p1.y, p1.z), self.distancia_focal)
-                        scn2 = self.window3d.generate_scn_3d_perspective(
-                            (p2.x, p2.y, p2.z), self.distancia_focal)
-                    else:
-                        scn1 = self.window3d.generate_scn_3d((p1.x, p1.y, p1.z))
-                        scn2 = self.window3d.generate_scn_3d((p2.x, p2.y, p2.z))
-                    resultado = fn_clip(scn1, scn2)
-                    if resultado:
-                        vp1 = self.viewport.viewport_transform_scn(resultado[0])
-                        vp2 = self.viewport.viewport_transform_scn(resultado[1])
-                        painter.drawLine(int(vp1[0]), int(vp1[1]),
-                                         int(vp2[0]), int(vp2[1]))
+                self._desenhar_wireframe_3d(painter, segmentos)
                 continue
 
             # Converte para SCN (clipping acontece aqui, em [-1,1]x[-1,1])
@@ -247,13 +228,8 @@ class Canvas(QWidget):
                     else:
                         anterior_vp = None
 
-        # Exibe o framebuffer (com o 3D rasterizado) sobre a viewport.
-        if self.modo_framebuffer:
-            painter.drawImage(QPointF(self.viewport.xmin, self.viewport.ymin),
-                              self.framebuffer.to_qimage())
-
     # ------------------------------------------------------------------
-    # Rasterizacao 3D via Framebuffer (Trabalhos 2.1, 2.2 e 2.3)
+    # Auxiliares de renderização 3D
     # ------------------------------------------------------------------
     def _cor_rgb(self, cor_hex):
         """Converte '#RRGGBB' em tupla (r, g, b) de inteiros."""
@@ -267,31 +243,44 @@ class Canvas(QWidget):
         # Coordenadas locais ao framebuffer (origem no canto da viewport).
         return (x_vp - self.viewport.xmin, y_vp - self.viewport.ymin, z_view)
 
-    def _desenhar_objeto3d_framebuffer(self, obj):
-        """Rasteriza um Objeto3D (wireframe) no framebuffer com Bresenham."""
-        cor = self._cor_rgb(obj.cor)
-        for p1, p2 in obj.segmentos:
-            x1, y1, _ = self._mundo_para_fb((p1.x, p1.y, p1.z))
-            x2, y2, _ = self._mundo_para_fb((p2.x, p2.y, p2.z))
-            self.framebuffer.draw_line(x1, y1, x2, y2, cor)
+    def _desenhar_wireframe_3d(self, painter, segmentos):
+        """Desenha uma lista de segmentos 3D como arame (projeção + clipping)."""
+        fn_clip = (clip_reta_cohen_sutherland
+                   if self.algoritmo_clip_reta == "CS"
+                   else clip_reta_liang_barsky)
+        for p1, p2 in segmentos:
+            if self.modo_perspectiva:
+                scn1 = self.window3d.generate_scn_3d_perspective(
+                    (p1.x, p1.y, p1.z), self.distancia_focal)
+                scn2 = self.window3d.generate_scn_3d_perspective(
+                    (p2.x, p2.y, p2.z), self.distancia_focal)
+            else:
+                scn1 = self.window3d.generate_scn_3d((p1.x, p1.y, p1.z))
+                scn2 = self.window3d.generate_scn_3d((p2.x, p2.y, p2.z))
+            resultado = fn_clip(scn1, scn2)
+            if resultado:
+                vp1 = self.viewport.viewport_transform_scn(resultado[0])
+                vp2 = self.viewport.viewport_transform_scn(resultado[1])
+                painter.drawLine(int(vp1[0]), int(vp1[1]),
+                                 int(vp2[0]), int(vp2[1]))
 
-    def _desenhar_phong_framebuffer(self, obj):
-        """Rasteriza um Objeto3DPhong no framebuffer (Phong por pixel ou cor plana)."""
-        cor_plana = self._cor_rgb(obj.cor)
+    def _rasterizar_objeto3d(self, obj, modo):
+        """Rasteriza as faces de um Objeto3D no framebuffer (sólido ou Phong)."""
+        cor = self._cor_rgb(obj.cor)
         olho = tuple(self.window3d.vrp)
         for tri in obj.triangulos:
-            (vw0, vw1, vw2) = tri['v']
-            (n0, n1, n2) = tri['n']
+            vw0, vw1, vw2 = tri['v']
+            n0, n1, n2 = tri['n']
             f0 = self._mundo_para_fb(vw0)
             f1 = self._mundo_para_fb(vw1)
             f2 = self._mundo_para_fb(vw2)
-            if self.usar_phong:
-                # Vertice completo: (x_fb, y_fb, z_view, x_world, y_world, z_world)
+            if modo == "phong":
+                # Vértice completo: (x_fb, y_fb, z_view, x_world, y_world, z_world)
                 v0 = (f0[0], f0[1], f0[2], vw0[0], vw0[1], vw0[2])
                 v1 = (f1[0], f1[1], f1[2], vw1[0], vw1[1], vw1[2])
                 v2 = (f2[0], f2[1], f2[2], vw2[0], vw2[1], vw2[2])
                 self.framebuffer.draw_triangle_phong(
                     v0, v1, v2, n0, n1, n2,
                     self.material, self.luz, olho, self.luz_ambiente)
-            else:
-                self.framebuffer.draw_triangle_3d(f0, f1, f2, cor_plana)
+            else:  # sólido: cor plana + Z-buffer (Trabalho 2.2)
+                self.framebuffer.draw_triangle_3d(f0, f1, f2, cor)

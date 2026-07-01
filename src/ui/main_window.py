@@ -8,7 +8,7 @@ from PyQt6.QtCore import Qt
 from src.ui.canvas import Canvas
 from src.core.geometry import (
     Ponto, Reta, Wireframe, Curva2D, BSpline2D, Ponto3D, Objeto3D,
-    SuperficieBSpline3D, Objeto3DPhong,
+    SuperficieBSpline3D, triangulo_flat, arestas_de_triangulos,
 )
 from src.core.powergirl_model import get_powergirl_triangles
 from src.core.transform3d import Transform3D as Transform3D3D
@@ -797,7 +797,7 @@ class MainWindow(QMainWindow):
         self.transform = Transform()
 
         self.setWindowTitle("Sistema Grafico Interativo - V1.8")
-        self.setGeometry(100, 100, 1100, 700)
+        self.setGeometry(80, 80, 1280, 680)
 
         self.aplicar_tema()
         self.setup_ui()
@@ -859,15 +859,20 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(10, 10, 10, 10)
         self.setCentralWidget(main_widget)
 
-        # ESQUERDA: Painel de Controle
-        painel_layout = QVBoxLayout()
-        main_layout.addLayout(painel_layout, stretch=1)
+        # ESQUERDA: Painel de Controle em duas colunas (cabe em tela de laptop)
+        painel_container = QHBoxLayout()
+        main_layout.addLayout(painel_container, stretch=3)
+        coluna_esq = QVBoxLayout()
+        coluna_dir = QVBoxLayout()
+        painel_container.addLayout(coluna_esq)
+        painel_container.addLayout(coluna_dir)
 
         # --- Grupo 1: Objetos ---
         grupo_objetos = QGroupBox("Objetos")
         layout_objetos = QVBoxLayout(grupo_objetos)
 
         self.list_widget = QListWidget()
+        self.list_widget.setMaximumHeight(110)
         self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list_widget.customContextMenuRequested.connect(self.abrir_menu_contexto)
         self.list_widget.itemDoubleClicked.connect(self.editar_objeto_selecionado)
@@ -883,13 +888,14 @@ class MainWindow(QMainWindow):
         botoes_lista_layout.addWidget(btn_editar)
         layout_objetos.addLayout(botoes_lista_layout)
 
-        painel_layout.addWidget(grupo_objetos)
+        coluna_esq.addWidget(grupo_objetos)
 
         # --- Grupo: Objetos 3D ---
         grupo_3d = QGroupBox("Objetos 3D")
         layout_3d = QVBoxLayout(grupo_3d)
 
         self.list_widget_3d = QListWidget()
+        self.list_widget_3d.setMaximumHeight(110)
         self.list_widget_3d.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list_widget_3d.customContextMenuRequested.connect(self._menu_contexto_3d)
         self.list_widget_3d.itemDoubleClicked.connect(self._editar_objeto_3d)
@@ -910,7 +916,7 @@ class MainWindow(QMainWindow):
         botoes_superficie.addWidget(btn_nova_superficie)
         layout_3d.addLayout(botoes_superficie)
 
-        painel_layout.addWidget(grupo_3d)
+        coluna_esq.addWidget(grupo_3d)
 
         # --- Grupo: Arquivo (2D + 3D) ---
         grupo_arquivo = QGroupBox("Arquivo (2D + 3D)")
@@ -922,7 +928,7 @@ class MainWindow(QMainWindow):
         botoes_obj_layout.addWidget(btn_importar)
         botoes_obj_layout.addWidget(btn_exportar)
 
-        painel_layout.addWidget(grupo_arquivo)
+        coluna_esq.addWidget(grupo_arquivo)
 
         # --- Grupo: Navegação ---
         grupo_nav = QGroupBox("Navegação")
@@ -995,8 +1001,8 @@ class MainWindow(QMainWindow):
         zoom_row.addWidget(btn_zoom_out)
         layout_nav.addLayout(zoom_row)
 
-        painel_layout.addWidget(grupo_nav)
-        painel_layout.addStretch()
+        coluna_esq.addWidget(grupo_nav)
+        coluna_esq.addStretch()
 
         # --- Grupo 3: Clipping de Reta ---
         grupo_clip = QGroupBox("Clipping de Reta")
@@ -1011,7 +1017,7 @@ class MainWindow(QMainWindow):
 
         clipping_layout.addWidget(self.radio_cs)
         clipping_layout.addWidget(self.radio_lb)
-        painel_layout.addWidget(grupo_clip)
+        coluna_dir.addWidget(grupo_clip)
 
         # --- Grupo: Perspectiva ---
         grupo_persp = QGroupBox("Projeção 3D")
@@ -1040,11 +1046,11 @@ class MainWindow(QMainWindow):
         self._label_modo_persp.setWordWrap(True)
         layout_persp.addWidget(self._label_modo_persp)
 
-        painel_layout.addWidget(grupo_persp)
+        coluna_dir.addWidget(grupo_persp)
 
         # --- Grupo: Rasterização / Shading ---
-        painel_layout.addWidget(self._criar_grupo_shading())
-        painel_layout.addStretch()
+        coluna_dir.addWidget(self._criar_grupo_shading())
+        coluna_dir.addStretch()
 
         # DIREITA: Canvas (Viewport)
         grupo_viewport = QGroupBox("Viewport")
@@ -1495,38 +1501,41 @@ class MainWindow(QMainWindow):
         self._atualizar_label_modo()
         self.canvas.update()
 
-    # --- Rasterização / Shading (Trabalhos 2.1, 2.2 e 2.3) ---
+    # --- Exibição 3D: Arame / Sólido / Phong (Trabalhos 2.1, 2.2 e 2.3) ---
 
     def _criar_grupo_shading(self):
-        """Monta o grupo de controles de rasterização e iluminação de Phong."""
-        grupo = QGroupBox("Rasterização / Shading")
+        """Monta o grupo de controles de exibição 3D e iluminação de Phong."""
+        grupo = QGroupBox("Exibição 3D (Rasterização)")
         layout = QVBoxLayout(grupo)
 
-        # Toggles principais
-        self.check_framebuffer = QCheckBox("Usar Framebuffer")
-        self.check_framebuffer.toggled.connect(self._toggle_framebuffer)
-        layout.addWidget(self.check_framebuffer)
+        # Modo de exibição dos objetos 3D (aplicado a todos de uma vez).
+        self.radio_arame = QRadioButton("Arame (wireframe)")
+        self.radio_solido = QRadioButton("Sólido (Z-buffer)")
+        self.radio_phong = QRadioButton("Phong (iluminação)")
+        self.radio_arame.setChecked(True)
+        self.grupo_modo_3d = QButtonGroup(self)
+        for r in (self.radio_arame, self.radio_solido, self.radio_phong):
+            self.grupo_modo_3d.addButton(r)
+            layout.addWidget(r)
+        self.radio_arame.toggled.connect(lambda on: on and self._set_modo_render("arame"))
+        self.radio_solido.toggled.connect(lambda on: on and self._set_modo_render("solido"))
+        self.radio_phong.toggled.connect(lambda on: on and self._set_modo_render("phong"))
 
         self.check_zbuffer = QCheckBox("Usar Z-buffer")
         self.check_zbuffer.setChecked(True)
         self.check_zbuffer.toggled.connect(self._toggle_zbuffer)
         layout.addWidget(self.check_zbuffer)
 
-        self.check_phong = QCheckBox("Iluminação de Phong")
-        self.check_phong.setChecked(True)
-        self.check_phong.toggled.connect(self._toggle_phong)
-        layout.addWidget(self.check_phong)
-
-        btn_powergirl = QPushButton("Carregar PowerGirl")
-        btn_powergirl.clicked.connect(self._carregar_powergirl)
-        layout.addWidget(btn_powergirl)
+        btn_esfera = QPushButton("Adicionar esfera de teste")
+        btn_esfera.clicked.connect(self._adicionar_esfera_teste)
+        layout.addWidget(btn_esfera)
 
         # Posição da luz (Lx, Ly, Lz) — valores iniciais iguais aos padrões do Canvas
         layout.addWidget(QLabel("Posição da luz (Lx, Ly, Lz):"))
         linha_luz = QHBoxLayout()
         self.input_lx = QLineEdit("200"); self.input_lx.setFixedWidth(55)
         self.input_ly = QLineEdit("200"); self.input_ly.setFixedWidth(55)
-        self.input_lz = QLineEdit("300"); self.input_lz.setFixedWidth(55)
+        self.input_lz = QLineEdit("-300"); self.input_lz.setFixedWidth(55)
         for inp in (self.input_lx, self.input_ly, self.input_lz):
             inp.editingFinished.connect(self._atualizar_luz)
             linha_luz.addWidget(inp)
@@ -1571,16 +1580,13 @@ class MainWindow(QMainWindow):
         self._label_ks.setText(f"Ks: {self._slider_ks.value() / 100.0:.2f}")
         self._label_shine.setText(f"Shininess: {self._slider_shine.value()}")
 
-    def _toggle_framebuffer(self, checked):
-        self.canvas.modo_framebuffer = checked
+    def _set_modo_render(self, modo):
+        """Define o modo de exibição 3D (arame/solido/phong) para todos os objetos 3D."""
+        self.canvas.modo_render_3d = modo
         self.canvas.update()
 
     def _toggle_zbuffer(self, checked):
         self.canvas.usar_zbuffer = checked
-        self.canvas.update()
-
-    def _toggle_phong(self, checked):
-        self.canvas.usar_phong = checked
         self.canvas.update()
 
     def _atualizar_luz(self):
@@ -1605,24 +1611,26 @@ class MainWindow(QMainWindow):
         self._atualizar_labels_material()
         self.canvas.update()
 
-    def _carregar_powergirl(self):
-        """Carrega o modelo PowerGirl (esfera procedural) como Objeto3DPhong."""
-        nome_base = "PowerGirl"
+    def _adicionar_esfera_teste(self):
+        """Adiciona uma esfera de teste (Objeto3D com faces) para demonstrar Phong."""
+        nome_base = "Esfera"
         nomes = [o.nome for o in self.display_file.obter_todos()]
         nome = nome_base
         contador = 1
         while nome in nomes:
             nome = f"{nome_base}_{contador}"
             contador += 1
-        triangulos = get_powergirl_triangles()
-        obj = Objeto3DPhong(nome, triangulos, "#CCA0FF")
+        # Posiciona a esfera à esquerda, longe do cubo (origem) e da pirâmide (x=200).
+        triangulos = get_powergirl_triangles(centro=(-200.0, 0.0, 0.0))
+        segmentos = arestas_de_triangulos(triangulos)
+        obj = Objeto3D(nome, segmentos, "#CCA0FF", triangulos=triangulos)
         self.display_file.adicionar_objeto(obj)
-        item = QListWidgetItem(f"{nome} [Objeto3DPhong]")
+        item = QListWidgetItem(f"{nome} [Objeto3D]")
         item.setData(Qt.ItemDataRole.UserRole, nome)
         self.list_widget_3d.addItem(item)
-        # Garante que o framebuffer esteja ativo para visualizar o modelo.
-        if not self.check_framebuffer.isChecked():
-            self.check_framebuffer.setChecked(True)
+        # Se ainda estiver em Arame, muda para Phong para visualizar o sombreamento.
+        if self.canvas.modo_render_3d == "arame":
+            self.radio_phong.setChecked(True)
         self.canvas.update()
 
     def keyPressEvent(self, event):
@@ -1651,8 +1659,17 @@ class MainWindow(QMainWindow):
 
     # --- Cena Inicial ---
 
+    @staticmethod
+    def _quads_para_triangulos(vertices, quads, centro=None):
+        """Converte faces quadrangulares (índices) em triângulos com normal plana."""
+        triangulos = []
+        for a, b, c, d in quads:
+            triangulos.append(triangulo_flat(vertices[a], vertices[b], vertices[c], centro))
+            triangulos.append(triangulo_flat(vertices[a], vertices[c], vertices[d], centro))
+        return triangulos
+
     def _carregar_cena_inicial(self):
-        """Adiciona cubo e pirâmide ao display file no startup."""
+        """Adiciona cubo e pirâmide (com faces) ao display file no startup."""
         # Cubo centrado na origem (size 100)
         cv = [
             (-50, -50, -50), (50, -50, -50), (50,  50, -50), (-50,  50, -50),
@@ -1661,7 +1678,11 @@ class MainWindow(QMainWindow):
         ce = [(0,1),(1,2),(2,3),(3,0), (4,5),(5,6),(6,7),(7,4),
               (0,4),(1,5),(2,6),(3,7)]
         cube_segs = [(Ponto3D(*cv[i]), Ponto3D(*cv[j])) for i, j in ce]
-        cubo = Objeto3D("Cubo", cube_segs, "#0000FF")
+        # Faces do cubo (quads) -> triângulos com normal plana orientada para fora.
+        cube_quads = [(0,1,2,3), (4,5,6,7), (0,4,7,3),
+                      (1,5,6,2), (3,7,6,2), (0,4,5,1)]
+        cube_tris = self._quads_para_triangulos(cv, cube_quads, centro=(0,0,0))
+        cubo = Objeto3D("Cubo", cube_segs, "#0000FF", triangulos=cube_tris)
 
         # Pirâmide quadrangular deslocada (centro em x=200)
         pv = [
@@ -1671,7 +1692,16 @@ class MainWindow(QMainWindow):
         ]
         pe = [(0,1),(0,2),(0,3),(0,4), (1,2),(2,3),(3,4),(4,1)]
         pyr_segs = [(Ponto3D(*pv[i]), Ponto3D(*pv[j])) for i, j in pe]
-        piramide = Objeto3D("Piramide", pyr_segs, "#FF0000")
+        centro_pyr = (200, -14, 0)  # centróide aproximado
+        pyr_tris = [
+            triangulo_flat(pv[0], pv[1], pv[2], centro_pyr),  # 4 lados
+            triangulo_flat(pv[0], pv[2], pv[3], centro_pyr),
+            triangulo_flat(pv[0], pv[3], pv[4], centro_pyr),
+            triangulo_flat(pv[0], pv[4], pv[1], centro_pyr),
+            triangulo_flat(pv[1], pv[2], pv[3], centro_pyr),  # base (2 triângulos)
+            triangulo_flat(pv[1], pv[3], pv[4], centro_pyr),
+        ]
+        piramide = Objeto3D("Piramide", pyr_segs, "#FF0000", triangulos=pyr_tris)
 
         for obj in (cubo, piramide):
             self.display_file.adicionar_objeto(obj)

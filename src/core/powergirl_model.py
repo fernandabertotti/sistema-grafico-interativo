@@ -10,8 +10,11 @@ import math
 
 def get_powergirl_triangles(raio: float = 100.0,
                             segmentos_u: int = 16,
-                            segmentos_v: int = 16):
+                            segmentos_v: int = 16,
+                            centro=(0.0, 0.0, 0.0)):
     """Retorna a lista de triangulos do modelo (esfera UV subdividida).
+
+    `centro` desloca a esfera no mundo (as normais nao mudam com translacao).
 
     Cada triangulo e um dict:
       {
@@ -19,6 +22,8 @@ def get_powergirl_triangles(raio: float = 100.0,
         'n': [(nx, ny, nz), (nx, ny, nz), (nx, ny, nz)],  # normais por vertice
       }
     """
+    cx, cy, cz = centro
+
     def normal(i, j):
         # i (latitude): 0..segmentos_v ; j (longitude): 0..segmentos_u
         theta = math.pi * i / segmentos_v        # 0..pi (polo a polo)
@@ -29,7 +34,7 @@ def get_powergirl_triangles(raio: float = 100.0,
         return (nx, ny, nz)
 
     def vertice(nrm):
-        return (nrm[0] * raio, nrm[1] * raio, nrm[2] * raio)
+        return (nrm[0] * raio + cx, nrm[1] * raio + cy, nrm[2] * raio + cz)
 
     triangulos = []
     for i in range(segmentos_v):

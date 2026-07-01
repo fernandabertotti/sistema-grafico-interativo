@@ -1,5 +1,6 @@
 # src/core/geometry.py
 from typing import List, Tuple
+import numpy as np
 
 class ObjetoGrafico:
     """Classe base para todos os objetos do sistema"""
@@ -43,20 +44,61 @@ class Ponto3D:
 
 # Não herda ObjetoGrafico: base usa pontos 2D; Canvas identifica por obj.tipo (string).
 class Objeto3D:
-    def __init__(self, nome: str, segmentos: List[Tuple["Ponto3D", "Ponto3D"]], cor: str = "#000000"):
+    """Objeto 3D com arestas (wireframe) e, opcionalmente, faces trianguladas.
+
+    - `segmentos`: arestas para o modo Arame.
+    - `triangulos`: lista de dicts {'v': [(x,y,z)*3], 'n': [(nx,ny,nz)*3]} para os
+      modos Sólido (Z-buffer) e Phong. Se None, o objeto só existe como arame.
+    """
+    def __init__(self, nome: str, segmentos: List[Tuple["Ponto3D", "Ponto3D"]],
+                 cor: str = "#000000", triangulos=None):
         self.nome = nome
         self.segmentos = segmentos  # List[Tuple[Ponto3D, Ponto3D]]
         self.tipo = "Objeto3D"
         self.cor = cor
+        self.triangulos = triangulos  # list[dict] com 'v' e 'n', ou None
 
 
-class Objeto3DPhong:
-    """Objeto 3D com triangulos e normais por vertice para iluminacao de Phong."""
-    def __init__(self, nome, triangulos, cor="#888888"):
-        self.nome = nome
-        self.triangulos = triangulos  # list[dict] com 'v' e 'n'
-        self.tipo = "Objeto3DPhong"
-        self.cor = cor
+def triangulo_flat(p0, p1, p2, centro=None):
+    """Cria um triângulo com normal plana (flat) única para os 3 vértices.
+
+    Se `centro` for dado, a normal é orientada para fora (apontando na direção
+    oposta ao centro do objeto). Caso contrário, usa a normal bruta da winding.
+    Retorna um dict {'v': [...], 'n': [...]}.
+    """
+    a = np.array(p0, dtype=float)
+    b = np.array(p1, dtype=float)
+    c = np.array(p2, dtype=float)
+    n = np.cross(b - a, c - a)
+    norma = np.linalg.norm(n)
+    n = np.array([0.0, 0.0, 1.0]) if norma < 1e-9 else n / norma
+    if centro is not None:
+        meio = (a + b + c) / 3.0
+        if np.dot(n, meio - np.array(centro, dtype=float)) < 0:
+            n = -n
+    nt = (float(n[0]), float(n[1]), float(n[2]))
+    vs = [(float(p0[0]), float(p0[1]), float(p0[2])),
+          (float(p1[0]), float(p1[1]), float(p1[2])),
+          (float(p2[0]), float(p2[1]), float(p2[2]))]
+    return {'v': vs, 'n': [nt, nt, nt]}
+
+
+def arestas_de_triangulos(triangulos):
+    """Deriva a lista de arestas (segmentos wireframe) a partir dos triângulos."""
+    vistos = set()
+    segmentos = []
+    for tri in triangulos:
+        vs = tri['v']
+        for i, j in ((0, 1), (1, 2), (2, 0)):
+            va, vb = vs[i], vs[j]
+            ca = tuple(round(c, 4) for c in va)
+            cb = tuple(round(c, 4) for c in vb)
+            chave = (ca, cb) if ca <= cb else (cb, ca)
+            if chave in vistos:
+                continue
+            vistos.add(chave)
+            segmentos.append((Ponto3D(*va), Ponto3D(*vb)))
+    return segmentos
 
 
 class SuperficieBSpline3D:
