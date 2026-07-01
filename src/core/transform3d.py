@@ -217,6 +217,77 @@ class Transform3D:
         return resultado
 
     @staticmethod
+    def _matriz_para_transformacao(t, centro) -> np.ndarray:
+        """Constrói a matriz 4x4 de uma transformação, dado o centro do objeto."""
+        tipo = t[0]
+        cx, cy, cz = centro
+        if tipo == "translacao":
+            _, dx, dy, dz = t
+            return Transform3D.translation_matrix(dx, dy, dz)
+        if tipo == "escalonamento":
+            _, sx, sy, sz = t
+            return (Transform3D.translation_matrix(-cx, -cy, -cz)
+                    @ Transform3D.scaling_matrix(sx, sy, sz)
+                    @ Transform3D.translation_matrix(cx, cy, cz))
+        if tipo in ("rotacao_x", "rotacao_y", "rotacao_z"):
+            _, angulo = t
+            fn = {'x': Transform3D.rotation_x_matrix,
+                  'y': Transform3D.rotation_y_matrix,
+                  'z': Transform3D.rotation_z_matrix}[tipo[-1]]
+            return (Transform3D.translation_matrix(-cx, -cy, -cz)
+                    @ fn(angulo)
+                    @ Transform3D.translation_matrix(cx, cy, cz))
+        if tipo == "rotacao_arbitraria":
+            _, angulo, eixo, ponto = t
+            return Transform3D.rotation_arbitrary_axis(angulo, eixo, ponto)
+        return np.eye(4)
+
+    @staticmethod
+    def apply_matrix_triangulos(matrix: np.ndarray, triangulos) -> list:
+        """Aplica a matriz aos vértices e às normais dos triângulos.
+
+        As normais usam a inversa-transposta da parte linear (correto para
+        escala não-uniforme) e são renormalizadas.
+        """
+        L = matrix[:3, :3]
+        try:
+            L_inv_T = np.linalg.inv(L).T
+        except np.linalg.LinAlgError:
+            L_inv_T = L  # degenerado: cai para a própria matriz
+        novos = []
+        for tri in triangulos:
+            vs = []
+            for (x, y, z) in tri['v']:
+                v = np.array([x, y, z, 1.0]) @ matrix
+                vs.append((float(v[0]), float(v[1]), float(v[2])))
+            ns = []
+            for (nx, ny, nz) in tri['n']:
+                n = np.array([nx, ny, nz], dtype=float) @ L_inv_T
+                norma = np.linalg.norm(n)
+                if norma > 1e-12:
+                    n = n / norma
+                ns.append((float(n[0]), float(n[1]), float(n[2])))
+            novos.append({'v': vs, 'n': ns})
+        return novos
+
+    @staticmethod
+    def aplicar_lista_transformacoes_com_faces(segmentos, triangulos, lista):
+        """Aplica a lista de transformações a segmentos E triângulos, coerentemente.
+
+        Usa a mesma matriz (e o mesmo centro, vindo dos segmentos) para os dois,
+        mantendo arame e faces alinhados. Retorna (segmentos, triangulos).
+        """
+        segs = list(segmentos)
+        tris = list(triangulos) if triangulos else None
+        for t in lista:
+            centro = Transform3D.centro_objeto(segs)
+            M = Transform3D._matriz_para_transformacao(t, centro)
+            segs = Transform3D.apply_matrix(M, segs)
+            if tris is not None:
+                tris = Transform3D.apply_matrix_triangulos(M, tris)
+        return segs, tris
+
+    @staticmethod
     def aplicar_lista_transformacoes_matriz(matriz_pontos, lista) -> list:
         resultado = [list(linha) for linha in matriz_pontos]
         for t in lista:

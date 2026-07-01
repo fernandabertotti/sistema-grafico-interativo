@@ -974,14 +974,8 @@ class MainWindow(QMainWindow):
         grid_trl.addWidget(btn_y_neg, 2, 1)
         layout_nav.addLayout(grid_trl)
 
-        linha_z = QHBoxLayout()
-        btn_z_pos = QPushButton("Z ↑ Aprox.")
-        btn_z_neg = QPushButton("Z ↓ Afastar")
-        btn_z_pos.clicked.connect(self._mover_z_pos)
-        btn_z_neg.clicked.connect(self._mover_z_neg)
-        linha_z.addWidget(btn_z_pos)
-        linha_z.addWidget(btn_z_neg)
-        layout_nav.addLayout(linha_z)
+        # (Z aproximar/afastar movidos para o grupo "Projeção 3D", pois só
+        #  têm efeito visível com a perspectiva ativada.)
 
         # Rotação
         layout_nav.addWidget(QLabel("Rotação"))
@@ -1060,6 +1054,18 @@ class MainWindow(QMainWindow):
         self._label_modo_persp = QLabel("Modo: Normal  |  [ diminui  ] aumenta d")
         self._label_modo_persp.setWordWrap(True)
         layout_persp.addWidget(self._label_modo_persp)
+
+        # Aproximar/afastar a câmera no eixo de visão (só tem efeito visível
+        # com a perspectiva ligada, por isso fica aqui).
+        layout_persp.addWidget(QLabel("Câmera (eixo de visão):"))
+        linha_z = QHBoxLayout()
+        btn_z_pos = QPushButton("Z ↑ Aprox.")
+        btn_z_neg = QPushButton("Z ↓ Afastar")
+        btn_z_pos.clicked.connect(self._mover_z_pos)
+        btn_z_neg.clicked.connect(self._mover_z_neg)
+        linha_z.addWidget(btn_z_pos)
+        linha_z.addWidget(btn_z_neg)
+        layout_persp.addLayout(linha_z)
 
         coluna_dir.addWidget(grupo_persp)
 
@@ -1429,8 +1435,14 @@ class MainWindow(QMainWindow):
             _, novas_segs_str, nova_cor = dialogo.obter_dados()
             transformacoes = dialogo.obter_transformacoes()
             if transformacoes:
-                obj.segmentos = Transform3D3D.aplicar_lista_transformacoes(
-                    obj.segmentos, transformacoes)
+                if getattr(obj, "triangulos", None):
+                    # Transforma arame E faces (vértices + normais) juntos.
+                    obj.segmentos, obj.triangulos = \
+                        Transform3D3D.aplicar_lista_transformacoes_com_faces(
+                            obj.segmentos, obj.triangulos, transformacoes)
+                else:
+                    obj.segmentos = Transform3D3D.aplicar_lista_transformacoes(
+                        obj.segmentos, transformacoes)
             elif novas_segs_str != segs_str:
                 try:
                     obj.segmentos = _parse_segmentos_3d(novas_segs_str)
@@ -1547,7 +1559,12 @@ class MainWindow(QMainWindow):
         self._label_ly, self._slider_ly = self._criar_slider_luz("Y", 200, layout)
         self._label_lz, self._slider_lz = self._criar_slider_luz("Z", -300, layout)
 
-        # Coeficientes de material (Ka, Kd, Ks) e Shininess via sliders
+        # Material do objeto (modelo de Phong): quanto ele reflete de cada
+        # componente de luz. Só afetam o modo Phong.
+        rotulo_material = QLabel("Material do objeto (Phong):")
+        rotulo_material.setStyleSheet("font-weight: bold;")
+        layout.addWidget(rotulo_material)
+
         self._label_ka = QLabel()
         self._slider_ka = self._criar_slider_coef(0, 100, 10, self._atualizar_material)
         layout.addWidget(self._label_ka)
@@ -1596,10 +1613,10 @@ class MainWindow(QMainWindow):
         return rotulo, slider
 
     def _atualizar_labels_material(self):
-        self._label_ka.setText(f"Ka: {self._slider_ka.value() / 100.0:.2f}")
-        self._label_kd.setText(f"Kd: {self._slider_kd.value() / 100.0:.2f}")
-        self._label_ks.setText(f"Ks: {self._slider_ks.value() / 100.0:.2f}")
-        self._label_shine.setText(f"Shininess: {self._slider_shine.value()}")
+        self._label_ka.setText(f"Ambiente (Ka): {self._slider_ka.value() / 100.0:.2f}")
+        self._label_kd.setText(f"Difuso (Kd): {self._slider_kd.value() / 100.0:.2f}")
+        self._label_ks.setText(f"Especular (Ks): {self._slider_ks.value() / 100.0:.2f}")
+        self._label_shine.setText(f"Brilho (Shininess): {self._slider_shine.value()}")
 
     def _set_cena(self, cena):
         """Alterna entre a cena 2D e a 3D (os dois tipos nunca aparecem juntos)."""
@@ -1712,15 +1729,16 @@ class MainWindow(QMainWindow):
         esf_segs = arestas_de_triangulos(esf_tris)
         esfera = Objeto3D("Esfera", esf_segs, "#CCA0FF", triangulos=esf_tris)
 
-        # Superfície B-Spline de exemplo (domo), abaixo dos objetos — também
-        # é sombreada nos modos Sólido/Phong.
-        sx = [-220, -75, 75, 220]
-        sz = [-220, -75, 75, 220]
+        # Superfície B-Spline de exemplo (domo), bem abaixo dos demais objetos
+        # (que estão em y≈0) para não haver sobreposição. Sombreada em Sólido/Phong.
+        sx = [-150, -50, 50, 150]
+        sz = [-150, -50, 50, 150]
+        base = -200  # deslocamento em Y (abaixo de tudo)
         alt = [
-            [-150, -110, -110, -150],
-            [-110,  -30,  -30, -110],
-            [-110,  -30,  -30, -110],
-            [-150, -110, -110, -150],
+            [base - 40, base - 10, base - 10, base - 40],
+            [base - 10, base + 50, base + 50, base - 10],
+            [base - 10, base + 50, base + 50, base - 10],
+            [base - 40, base - 10, base - 10, base - 40],
         ]
         matriz_sup = [[Ponto3D(sx[j], alt[i][j], sz[i]) for j in range(4)]
                       for i in range(4)]
