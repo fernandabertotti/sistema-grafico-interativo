@@ -1,6 +1,6 @@
 # Sistema Gráfico Interativo (SGI)
 
-Pipeline gráfico 2D e 3D implementado do zero em Python + PyQt6: window/viewport,
+Pipeline gráfico 2D e 3D implementado em Python + PyQt6: window/viewport,
 clipping, transformações, curvas (Bézier e B-Spline), superfícies bicúbicas e
 projeções paralela e perspectiva.
 
@@ -14,8 +14,7 @@ python main.py
 Requer Python 3.10+; as únicas dependências são `numpy` e `PyQt6`.
 
 Ao iniciar, o programa carrega uma cena de exemplo com um objeto de cada tipo.
-A viewport começa na cena 2D; alternando para 3D, a câmera já aparece em ângulo,
-permitindo visualizar os recursos de imediato.
+A viewport começa na cena 2D; alternando para 3D.
 
 ## Utilização
 
@@ -40,9 +39,7 @@ aplicá-las de uma só vez.
 - **Superfície B-Spline:** matriz de controle de 4×4 até 20×20, gerada por
   Forward Differences.
 
-**Importar / Exportar .obj.** Formato Wavefront, com extensões próprias
-(`usercor`, `usertype`, `userfill`, `usersteps`, `bsplinesurf`) que preservam
-cor, tipo, preenchimento e superfícies na ida e na volta. Compatível com objetos
+**Importar / Exportar .obj.** Formato Wavefront, compatível com objetos
 2D, 3D de arame e superfícies.
 
 **Navegação.** A câmera pode ser controlada pelos botões ou pelo teclado:
@@ -58,8 +55,7 @@ cor, tipo, preenchimento e superfícies na ida e na volta. Compatível com objet
 Liang-Barsky.
 
 **Projeção 3D.** Perspectiva (com controle da distância focal `d`) ou paralela
-ortogonal. *Z ↑ / Z ↓* aproxima e afasta a câmera — efeito mais perceptível com
-a perspectiva ativada.
+ortogonal. *Z ↑ / Z ↓* aproxima e afasta a câmera.
 
 ## Estrutura
 
