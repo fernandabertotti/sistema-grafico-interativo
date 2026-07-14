@@ -205,8 +205,8 @@ class JanelaObjetoDialog(QDialog):
         linha_angulo.addStretch()
         lr.addLayout(linha_angulo)
 
-        self.radio_centro_mundo = QRadioButton("Em torno do center do mundo")
-        self.radio_centro_objeto = QRadioButton("Em torno do center do objeto")
+        self.radio_centro_mundo = QRadioButton("Em torno do centro do mundo")
+        self.radio_centro_objeto = QRadioButton("Em torno do centro do objeto")
         self.radio_ponto_arb = QRadioButton("Em torno de um ponto arbitrário")
         self.radio_centro_objeto.setChecked(True)
 
@@ -305,10 +305,10 @@ class JanelaObjetoDialog(QDialog):
                 angulo = float(self.input_angulo.text())
                 if self.radio_centro_mundo.isChecked():
                     self.lista_transformacoes.append(("rotacao_origem", angulo))
-                    self.lista_transf_widget.addItem(f"Rotação {angulo}° (center do mundo)")
+                    self.lista_transf_widget.addItem(f"Rotação {angulo}° (centro do mundo)")
                 elif self.radio_centro_objeto.isChecked():
                     self.lista_transformacoes.append(("rotacao_centro", angulo))
-                    self.lista_transf_widget.addItem(f"Rotação {angulo}° (center do objeto)")
+                    self.lista_transf_widget.addItem(f"Rotação {angulo}° (centro do objeto)")
                 elif self.radio_ponto_arb.isChecked():
                     px = float(self.input_px.text())
                     py = float(self.input_py.text())
@@ -795,7 +795,7 @@ class MainWindow(QMainWindow):
         self.window3d = window3d
         self.transform = Transform()
 
-        self.setWindowTitle("Sistema Grafico Interativo - V1.8")
+        self.setWindowTitle("Sistema Gráfico Interativo - V1.8")
         self.setGeometry(100, 100, 1100, 700)
 
         self.aplicar_tema()
@@ -862,8 +862,23 @@ class MainWindow(QMainWindow):
         painel_layout = QVBoxLayout()
         main_layout.addLayout(painel_layout, stretch=1)
 
-        # --- Grupo 1: Objetos ---
-        grupo_objetos = QGroupBox("Objetos")
+        # --- Grupo: Cena Ativa (seletor 2D / 3D) ---
+        grupo_cena = QGroupBox("Cena Ativa")
+        layout_cena = QHBoxLayout(grupo_cena)
+        self.radio_cena_2d = QRadioButton("2D")
+        self.radio_cena_3d = QRadioButton("3D")
+        self.radio_cena_2d.setChecked(True)
+        grupo_cena_botoes = QButtonGroup(self)
+        grupo_cena_botoes.addButton(self.radio_cena_2d)
+        grupo_cena_botoes.addButton(self.radio_cena_3d)
+        self.radio_cena_2d.toggled.connect(lambda on: on and self._set_cena("2d"))
+        self.radio_cena_3d.toggled.connect(lambda on: on and self._set_cena("3d"))
+        layout_cena.addWidget(self.radio_cena_2d)
+        layout_cena.addWidget(self.radio_cena_3d)
+        painel_layout.addWidget(grupo_cena)
+
+        # --- Grupo 1: Objetos 2D ---
+        grupo_objetos = QGroupBox("Objetos 2D")
         layout_objetos = QVBoxLayout(grupo_objetos)
 
         self.list_widget = QListWidget()
@@ -1515,6 +1530,16 @@ class MainWindow(QMainWindow):
         else:
             super().keyPressEvent(event)
 
+    # --- Seletor de Cena ---
+
+    def _set_cena(self, cena):
+        """Alterna a cena ativa entre '2d' e '3d' (filtra o que é desenhado)."""
+        # setChecked() no setup_ui pode disparar antes do canvas existir
+        if not hasattr(self, "canvas"):
+            return
+        self.canvas.cena_ativa = cena
+        self.canvas.update()
+
     # --- Cena Inicial ---
 
     def _carregar_cena_inicial(self):
@@ -1544,5 +1569,27 @@ class MainWindow(QMainWindow):
             item = QListWidgetItem(f"{obj.nome} [Objeto3D]")
             item.setData(Qt.ItemDataRole.UserRole, obj.nome)
             self.list_widget_3d.addItem(item)
+
+        # --- Objetos 2D de exemplo (um de cada tipo) ---
+        objetos_2d = [
+            Ponto("Ponto", [(-320, 220)], "#000000"),
+            Reta("Reta", [(-370, 250), (-170, 120)], "#FF0000"),
+            Wireframe("Quadrado", [(-360, -250), (-210, -250),
+                                   (-210, -100), (-360, -100)],
+                      "#0000FF", preenchido=True),
+            Wireframe("Triangulo", [(-80, -250), (120, -250), (20, -80)], "#00AA00"),
+            Curva2D("Bezier", [(60, 60), (140, 250), (280, -80), (370, 120)], "#FF00FF"),
+            BSpline2D("BSpline", [(60, -250), (150, -90), (240, -250),
+                                  (330, -90), (380, -190)], "#FFA500"),
+        ]
+        for obj in objetos_2d:
+            self.display_file.adicionar_objeto(obj)
+            self.list_widget.addItem(f"{obj.nome} [{obj.tipo}]")
+            item = self.list_widget.item(self.list_widget.count() - 1)
+            item.setData(Qt.ItemDataRole.UserRole, obj.nome)
+
+        # Câmera 3D inicial em ângulo (visão isométrica dos objetos 3D)
+        self.window3d.rotate_v(-35)
+        self.window3d.rotate_u(25)
 
         self.canvas.update()

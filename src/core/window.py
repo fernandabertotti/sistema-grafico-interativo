@@ -22,7 +22,7 @@ class Window():
         return self.xmax - self.xmin
 
     @property
-    def hight(self):
+    def height(self):
         return self.ymax - self.ymin
 
     def _vetor_up(self):
@@ -68,13 +68,13 @@ class Window():
     def zoom_in(self, percentage=PERCENTAGE):
         factor = percentage / 100
         new_width = self.width * (1 - factor)
-        new_height = self.hight * (1 - factor)
+        new_height = self.height * (1 - factor)
 
         if new_width <= self.min_size or new_height <= self.min_size:
             return
 
         dx = self.width * factor / 2
-        dy = self.hight * factor / 2
+        dy = self.height * factor / 2
         self.xmin += dx
         self.xmax -= dx
         self.ymin += dy
@@ -83,7 +83,7 @@ class Window():
     def zoom_out(self, percentage=PERCENTAGE):
         factor = percentage / 100
         dx = self.width * factor / 2
-        dy = self.hight * factor / 2
+        dy = self.height * factor / 2
         self.xmin -= dx
         self.xmax += dx
         self.ymin -= dy
@@ -112,7 +112,7 @@ class Window():
 
         # 3. Normalizar para [-1, 1]
         half_w = self.width / 2
-        half_h = self.hight / 2
+        half_h = self.height / 2
 
         x_scn = x_r / half_w
         y_scn = y_r / half_h

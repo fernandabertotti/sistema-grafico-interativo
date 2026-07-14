@@ -22,6 +22,7 @@ class Canvas(QWidget):
         self.algoritmo_clip_reta = "CS"
         self.modo_perspectiva = False
         self.distancia_focal = 500.0
+        self.cena_ativa = "2d"        # "2d" ou "3d" — filtra o que é desenhado
         vp_width = self.viewport.xmax - self.viewport.xmin
         vp_height = self.viewport.ymax - self.viewport.ymin
         # Calcula a proporção da viewport
@@ -87,6 +88,13 @@ class Canvas(QWidget):
                          int(vp.xmax - vp.xmin), int(vp.ymax - vp.ymin))
 
         for obj in self.display_file.objetos:
+            # Filtra pela cena ativa: 2D mostra só objetos 2D, 3D só objetos 3D
+            tipo_3d = obj.tipo in ("Objeto3D", "SuperficieBSpline3D")
+            if self.cena_ativa == "2d" and tipo_3d:
+                continue
+            if self.cena_ativa == "3d" and not tipo_3d:
+                continue
+
             pen = QPen(QColor(obj.cor), 3)
             painter.setPen(pen)
 
